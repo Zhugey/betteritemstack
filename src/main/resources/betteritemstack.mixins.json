@@ -1,0 +1,21 @@
+{
+  "required": true,
+  "package": "com.zhugey.betteritemstack.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "DataComponentTypesMixin",
+    "InventoryMixin",
+    "ItemEntityMixin",
+    "ItemMixin",
+    "ItemStackMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  },
+  "client": [
+    "client.DrawContextMixin"
+  ]
+}
