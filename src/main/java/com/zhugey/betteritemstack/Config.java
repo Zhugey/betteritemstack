@@ -1,4 +1,5 @@
 package com.zhugey.betteritemstack;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
@@ -11,19 +12,60 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 配置管理类
+ * <p>
+ * 主要职责：
+ * <p>
+ * 1. 读取 JSON 配置文件
+ * <p>
+ * 2. 提供全局堆叠上限 GLOBAL_MAX
+ * <p>
+ * 3. 提供可选不堆叠物品列表
+ * <p>
+ * 4. 保存和重新加载配置
+ */
 public class Config {
+
+    // Gson 对象，用于 JSON 读写
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("betteritemstack.json");
+
+    // 配置文件路径
+    private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir()
+            .resolve("betteritemstack.json");
+
+    // 静态全局最大堆叠值
     public static int GLOBAL_MAX = Integer.MAX_VALUE;
+
+    // 配置版本（可扩展）
     public int configVersion = 1;
+
+    // 配置中的 global_max 初始值
     public int global_max = 9999;
-    // 添加一个新的字段，用于存储不需要堆叠的物品ID列表
+
+    // 可选黑名单列表，存储不允许堆叠的物品 ID
     public List<String> nonStackableItems = new ArrayList<>();
 
+    /**
+     * 加载配置文件
+     * <p>
+     * 主要逻辑：
+     * <p>
+     * 1. 文件存在则读取 JSON
+     * <p>
+     * 2. 初始化默认值（防止空指针）
+     * <p>
+     * 3. 设置 GLOBAL_MAX
+     * <p>
+     * 4. 保存配置文件（首次运行会生成 JSON）
+     *
+     * @return 返回配置对象
+     */
     public static Config load() {
         File configFile = CONFIG_PATH.toFile();
         Config config = new Config();
 
+        // 如果配置文件存在，读取 JSON
         if (configFile.exists()) {
             try (FileReader reader = new FileReader(configFile)) {
                 config = GSON.fromJson(reader, Config.class);
@@ -32,90 +74,23 @@ public class Config {
             }
         }
 
-        // 确保列表不为空，防止空指针异常
+        // 确保黑名单列表不为空
         if (config.nonStackableItems == null) {
             config.nonStackableItems = new ArrayList<>();
         }
 
-        // 如果是第一次运行，为列表添加一些默认值
-        if (config.nonStackableItems.isEmpty()) {
-            config.nonStackableItems.add("minecraft:wooden_sword");
-            config.nonStackableItems.add("minecraft:stone_sword");
-            config.nonStackableItems.add("minecraft:iron_sword");
-            config.nonStackableItems.add("minecraft:golden_sword");
-            config.nonStackableItems.add("minecraft:diamond_sword");
-            config.nonStackableItems.add("minecraft:netherite_sword");
-            config.nonStackableItems.add("minecraft:wooden_shovel");
-            config.nonStackableItems.add("minecraft:stone_shovel");
-            config.nonStackableItems.add("minecraft:iron_shovel");
-            config.nonStackableItems.add("minecraft:golden_shovel");
-            config.nonStackableItems.add("minecraft:diamond_shovel");
-            config.nonStackableItems.add("minecraft:netherite_shovel");
-            config.nonStackableItems.add("minecraft:wooden_pickaxe");
-            config.nonStackableItems.add("minecraft:stone_pickaxe");
-            config.nonStackableItems.add("minecraft:iron_pickaxe");
-            config.nonStackableItems.add("minecraft:golden_pickaxe");
-            config.nonStackableItems.add("minecraft:diamond_pickaxe");
-            config.nonStackableItems.add("minecraft:netherite_pickaxe");
-            config.nonStackableItems.add("minecraft:wooden_axe");
-            config.nonStackableItems.add("minecraft:stone_axe");
-            config.nonStackableItems.add("minecraft:iron_axe");
-            config.nonStackableItems.add("minecraft:golden_axe");
-            config.nonStackableItems.add("minecraft:diamond_axe");
-            config.nonStackableItems.add("minecraft:netherite_axe");
-            config.nonStackableItems.add("minecraft:wooden_hoe");
-            config.nonStackableItems.add("minecraft:stone_hoe");
-            config.nonStackableItems.add("minecraft:iron_hoe");
-            config.nonStackableItems.add("minecraft:golden_hoe");
-            config.nonStackableItems.add("minecraft:diamond_hoe");
-            config.nonStackableItems.add("minecraft:netherite_hoe");
-            config.nonStackableItems.add("minecraft:leather_helmet");
-            config.nonStackableItems.add("minecraft:chainmail_helmet");
-            config.nonStackableItems.add("minecraft:iron_helmet");
-            config.nonStackableItems.add("minecraft:golden_helmet");
-            config.nonStackableItems.add("minecraft:diamond_helmet");
-            config.nonStackableItems.add("minecraft:netherite_helmet");
-            config.nonStackableItems.add("minecraft:leather_chestplate");
-            config.nonStackableItems.add("minecraft:chainmail_chestplate");
-            config.nonStackableItems.add("minecraft:iron_chestplate");
-            config.nonStackableItems.add("minecraft:golden_chestplate");
-            config.nonStackableItems.add("minecraft:diamond_chestplate");
-            config.nonStackableItems.add("minecraft:netherite_chestplate");
-            config.nonStackableItems.add("minecraft:leather_leggings");
-            config.nonStackableItems.add("minecraft:chainmail_leggings");
-            config.nonStackableItems.add("minecraft:iron_leggings");
-            config.nonStackableItems.add("minecraft:golden_leggings");
-            config.nonStackableItems.add("minecraft:diamond_leggings");
-            config.nonStackableItems.add("minecraft:netherite_leggings");
-            config.nonStackableItems.add("minecraft:leather_boots");
-            config.nonStackableItems.add("minecraft:chainmail_boots");
-            config.nonStackableItems.add("minecraft:iron_boots");
-            config.nonStackableItems.add("minecraft:golden_boots");
-            config.nonStackableItems.add("minecraft:diamond_boots");
-            config.nonStackableItems.add("minecraft:netherite_boots");
-            config.nonStackableItems.add("minecraft:bow");
-            config.nonStackableItems.add("minecraft:crossbow");
-            config.nonStackableItems.add("minecraft:fishing_rod");
-            config.nonStackableItems.add("minecraft:carrot_on_a_stick");
-            config.nonStackableItems.add("minecraft:warped_fungus_on_a_stick");
-            config.nonStackableItems.add("minecraft:trident");
-            config.nonStackableItems.add("minecraft:shears");
-            config.nonStackableItems.add("minecraft:mace");
-            config.nonStackableItems.add("minecraft:shield");
-            config.nonStackableItems.add("minecraft:spyglass");
-            config.nonStackableItems.add("minecraft:turtle_helmet");
-            config.nonStackableItems.add("minecraft:elytra");
-            config.nonStackableItems.add("minecraft:brush");
-
-            // 你可以添加更多你认为不应该堆叠的物品
-        }
-
+        // 设置全局最大堆叠
         GLOBAL_MAX = config.global_max;
 
+        // 保存配置文件（首次运行生成）
         config.save();
+
         return config;
     }
 
+    /**
+     * 保存配置文件
+     */
     public void save() {
         try (FileWriter writer = new FileWriter(CONFIG_PATH.toFile())) {
             GSON.toJson(this, writer);
@@ -124,9 +99,12 @@ public class Config {
         }
     }
 
+    /**
+     * 重新加载配置
+     * <p>
+     * 作用：刷新 GLOBAL_MAX
+     */
     public void reload() {
-        save();
-        load();
+        load(); // 重新加载 JSON 配置
     }
 }
-
