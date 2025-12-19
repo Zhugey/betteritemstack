@@ -1,6 +1,5 @@
 package com.zhugey.betteritemstack.mixin;
 
-import com.zhugey.betteritemstack.Config;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.tooltip.TooltipType;
