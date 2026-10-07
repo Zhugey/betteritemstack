@@ -384,8 +384,9 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 升到 1.14+ 需同步升 Gradle，1.18 还要 JDK 25，而这对玩家零收益。
 
 另外**不要用 `-SNAPSHOT`**：它是浮动版本，同一份代码在不同时间可能拉到不同快照，构建不可复现；
-永远固定到正式版。注意 **Loom 1.12 起不再生成 refmap**，改为把注解里的注入目标就地重映射为
-intermediary——上层提到的 `mc_compat_check.py` 已同时支持这两种形式。
+永远固定到正式版。注意**产物结构随 Loom 版本变化**：1.11.x 仍生成 refmap，1.12 起不再生成，
+改为把注解里的注入目标就地重映射为 intermediary（实测：Loom 1.11.8 有 refmap，1.12.7 与 1.13.6 都没有）
+——上层提到的 `mc_compat_check.py` 已同时支持这两种形式。
 
 **Fabric API 是向后兼容的**：新版保留旧 API，因此用旧 API 编译的模组在新版 Fabric API 上照常运行；
 反过来才可能出问题。本 Mod 的 jar 里只引用了两个 Fabric API 类——
