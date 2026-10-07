@@ -340,6 +340,36 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 > 若要与 1.21.5+ 共用一份代码，需要把 `VanillaMax` 的组件读取改为新 API，并为 1.21.11+
 > 改写权限判定；这属于跨版本适配，超出当前 1.0.x 的范围。
 
+### `gradle.properties` 里的版本号分别管什么
+
+这三个**都只影响构建环境，玩家看不到**。玩家能否加载本模组，只由 `fabric.mod.json` 的
+`depends` 决定。
+
+| 配置 | 作用 | 玩家可见 | 结论 |
+|---|---|---|---|
+| `fabric_version` | 编译期依赖的 Fabric API，决定"代码最多能用多新的 API" | ❌ | 取该 MC 版本的**最早**一版最稳妥（现为 `0.101.2+1.21.1`），可保证只用到当时就存在的 API |
+| `loom_version` | Gradle 构建插件，负责反编译 / 重映射 / 开发环境 | ❌ | **与兼容性完全无关，不要为了"兼容玩家"而降级** |
+| `yarn_mappings` | 编译期把混淆名映射为可读名 | ❌ | 只有更换编译目标 `minecraft_version` 时才需同步修改 |
+| `minecraft_version` | 编译目标 MC 版本 | ❌ | 见上一节：产物是 intermediary 命名空间的，只要符号存在就能跨版本运行 |
+
+**Fabric API 是向后兼容的**：新版保留旧 API，因此用旧 API 编译的模组在新版 Fabric API 上照常运行；
+反过来才可能出问题。本 Mod 的 jar 里只引用了两个 Fabric API 类——
+`CommandRegistrationCallback` 与它的父类型 `Event`（2019 年即存在），
+所以 Fabric API 从 `0.101.2+1.21.1`（1.21.1 的最早版本）到最新版都能运行。
+`depends.fabric-api` 因此保持 `*`（允许任意版本），不额外设下限以免误伤。
+
+### 在哪里查版本
+
+- <https://fabricmc.net/develop/> —— 官方推荐页，选定 MC 版本后直接给出 yarn / loader / Fabric API / Loom
+- 机器可读的 meta API：
+  - `https://meta.fabricmc.net/v2/versions/yarn/<MC版本>`
+  - `https://meta.fabricmc.net/v2/versions/loader/<MC版本>`
+- Maven 目录（可浏览全部历史版本，与发布日期）：
+  - Fabric API `https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/`
+  - Loom `https://maven.fabricmc.net/net/fabricmc/fabric-loom/`
+  - Yarn `https://maven.fabricmc.net/net/fabricmc/yarn/`
+  - Loader `https://maven.fabricmc.net/net/fabricmc/fabric-loader/`
+
 ---
 
 ## 兼容性与已知限制
