@@ -327,18 +327,18 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 | 1.21.5 – 1.21.10 | ❌ 需修改代码 | `ComponentHolder#get(ComponentType)` 与 `getOrDefault(...)` 被移除（该类只剩 `contains` 与 `getComponents`），`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效 |
 | 1.21.11 | ❌ 需修改代码 | 除上一条外，`CommandSource#hasPermissionLevel(int)` 被新的权限体系取代（`ServerCommandSource#permissions` / `withPermissions`），`/bis set`、`/bis reload` 的权限判定需改写 |
 
-核验方式（脚本在 `.workbuddy/tools/verify/`，可复跑）：
+上述结论都能用**静态检查**复现，不需要实机逐个版本运行。两道检查分别是：
 
-1. **`mc_compat_check.py`** —— 从发布 jar 中提取 **Mixin 的注入目标**与 **class 常量池里的全部
+1. **注入目标与符号引用核对** —— 从构建产物中提取 **Mixin 的注入目标**与 **class 常量池里的全部
    intermediary 引用**，逐个到 1.21.1 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
-   注入目标的存放形式随 Loom 版本而变，脚本两者都支持：旧 Loom 放在 `refmap.json` 里，
+   注入目标的存放形式随 Loom 版本而变，两种都要覆盖：旧 Loom 放在 `refmap.json` 里，
    新 Loom（≥1.12）不再生成 refmap、而是把目标**就地重映射进注解**
-   （`@At(target="Lnet/minecraft/class_1799;method_7914()I")`），脚本会从注解里读取。
+   （`@At(target="Lnet/minecraft/class_1799;method_7914()I")`），此时须用 `javap -v` 从注解里读取。
    编译器以"静态接收类型"发出成员引用（如 `ItemStack.toString()`），而映射只收录声明该成员的类，
-   因此继承/桥接方法会回退到全表查找，避免误报。
-2. **`redirect_count_check.py`** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
-   这类问题符号存在性检查发现不了。该脚本直接读 Mojang 客户端字节码，逐方法统计
-   `ItemStack#getMaxCount()` 的调用次数，确认 1.21.1 – 1.21.4 的调用画像完全一致（均为 1 次）。
+   因此继承/桥接方法要回退到全表查找，否则会误报。
+2. **`@Redirect` 调用次数核对** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
+   这类问题靠符号存在性检查发现不了，必须读字节码。直接取 Mojang 客户端产物，
+   逐方法统计 `ItemStack#getMaxCount()` 的调用次数，确认 1.21.1 – 1.21.4 的调用画像完全一致（均为 1 次）。
 
 > 若要与 1.21.5+ 共用一份代码，需要把 `VanillaMax` 的组件读取改为新 API，并为 1.21.11+
 > 改写权限判定；这属于跨版本适配，超出当前 1.0.x 的范围。
@@ -436,7 +436,7 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 
 产物位于 `build/libs/`：
 
-- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 实际使用的模组文件（如 `BetterItemStack-1.0.1-1.21.1-1.21.4.jar`）
+- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 实际使用的模组文件（如 `BetterItemStack-1.0.2-1.21.1-1.21.4.jar`）
 - `BetterItemStack-<Mod版本>-<MC区间>-sources.jar` — 源码
 
 产物名里的版本区间取自 `gradle.properties` 的 `minecraft_version_min` / `minecraft_version_max`，
@@ -510,8 +510,9 @@ src/main/resources/assets/betteritemstack/lang/
 └── ru_ru.json / de_de.json / fr_fr.json / es_es.json / pt_br.json
 ```
 
-容器名不是手写的，而是生成时从 Minecraft 官方语言文件里取 `block.minecraft.*` 的权威译名，
-生成脚本与校验在 `.workbuddy/tools/gen_lang.py`（生成时会校验各语言的键集合与 `%s` 占位符个数）。
+容器名不是手写的，而是生成时从 Minecraft 官方语言文件里取 `block.minecraft.*` 的权威译名
+（凭记忆写容易出错，例如德语里 `dropper` 是 `Spender`、`dispenser` 反而是 `Werfer`）。
+生成时会校验各语言的键集合一致、且每个键的 `%s` 占位符个数与代码中的调用一致。
 
 ---
 
@@ -538,6 +539,6 @@ src/main/resources/assets/betteritemstack/lang/
 | 日本語 | `ja_jp` | Español | `es_es` |
 | 한국어 | `ko_kr` | Português (Brasil) | `pt_br` |
 
-添加/修正语言：直接编辑 `assets/betteritemstack/lang/<locale>.json`，或在
-`.workbuddy/tools/gen_lang.py` 里补一份文案后用脚本重新生成。
+添加/修正语言：直接编辑 `assets/betteritemstack/lang/<locale>.json`。注意两点——
+各语言的**键集合要保持一致**（缺键会显示原始键名），以及每个键的 `%s` 个数要与代码中的调用匹配。
 非中英文的译文欢迎在 Issues 里提出修正。
