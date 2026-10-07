@@ -362,6 +362,8 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 工作流会构建、从 `CHANGELOG.md` 抽取 `## 1.0.2` 一节作为 Release 正文，
 并把 `build/libs/*.jar` 作为附件上传。同一个 tag 重跑时会**更新**已有 Release，不会报错。
 
+tag 名带不带 `v` 前缀都可以（`v1.0.2` 与 `1.0.2` 等价，抽取时会自动剥掉前缀）。
+
 在 IntelliJ IDEA 里用界面完成同样的事（无需命令行）：
 
 | 步骤 | 操作 |
@@ -371,6 +373,15 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 | 推送 tag | 再次 `Git` → `Push...`，**务必勾选对话框底部的 `Push tags`**，下拉选 `All`，再点 `Push` |
 
 > **最容易漏掉的一步是最后一个**：tag 只创建在本地时不会触发任何 CI，"产物没更新"往往就出在这里。
+
+### 推了 tag 却没有 Release，怎么排查
+
+1. 确认 tag **真的到了远程**：浏览器打开 `<仓库地址>/tags`，能看到的才是已推送的；
+   或 `git ls-remote --tags origin`。
+2. 到 `Actions` 页看是否多了一次运行；没有的话就是 tag 没推送成功（回到上表的第三步）。
+3. 有运行但 `create release` 被 `skipped`：说明该运行不是由 tag 触发的。
+4. 有运行且失败：点进去看 `create release` 的日志——常见原因是仓库没有开启 Actions 的写权限
+   （`Settings` → `Actions` → `General` → `Workflow permissions` 选 `Read and write permissions`）。
 
 > 注意：普通的 push / PR **不会**创建 Release，只上传 Actions Artifact。
 > Artifact 需要登录 GitHub 才能下载且 90 天后过期，对外发布请以 Release 为准。

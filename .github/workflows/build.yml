@@ -3,9 +3,13 @@
 # certain platforms or Java versions, and provides a first line of defence
 # against bad commits.
 #
-# 推送 tag（v1.0.1 / V1.0.1 之类）时，会额外从 CHANGELOG.md 抽取该版本的小节，
+# 推送任意 tag（v1.0.1 / 1.0.1 / V1.0.1 均可）时，会额外从 CHANGELOG.md 抽取该版本的小节，
 # 自动创建 GitHub Release 并把 build/libs/*.jar 作为附件上传。
 # 详见文件末尾的两个步骤。
+#
+# 注意：不要在这里把条件收紧成只认 "v" 前缀。曾经因为写成 refs/tags/v*，
+# 而实际 tag 名为 1.0.1，导致推送 tag 后 Release 完全没有被创建、也没有任何报错。
+# 版本号统一用下面 extract 步骤里的 ${TAG#[vV]} 归一化即可。
 
 name: build
 on: [pull_request, push]
@@ -43,7 +47,7 @@ jobs:
       # ------------------------------------------------------------------
 
       - name: extract release notes from CHANGELOG.md
-        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V')
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -68,7 +72,7 @@ jobs:
           cat release-notes.md
 
       - name: create release
-        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V')
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
