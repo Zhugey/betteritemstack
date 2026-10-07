@@ -342,15 +342,40 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 ### `gradle.properties` 里的版本号分别管什么
 
-这三个**都只影响构建环境，玩家看不到**。玩家能否加载本模组，只由 `fabric.mod.json` 的
-`depends` 决定。
+这几个**都只影响构建环境，玩家看不到**，但它们对"玩家能不能装"的作用并不相同：
+只有 `loader_version` 和 `minecraft_version` 会进入 `fabric.mod.json` 的 `depends`，
+成为**玩家可见的硬门槛**。
 
-| 配置 | 作用 | 玩家可见 | 结论 |
+| 配置 | 玩家可见 | 作用 | 取值原则 |
 |---|---|---|---|
-| `fabric_version` | 编译期依赖的 Fabric API，决定"代码最多能用多新的 API" | ❌ | 取该 MC 版本的**最早**一版最稳妥（现为 `0.101.2+1.21.1`），可保证只用到当时就存在的 API |
-| `loom_version` | Gradle 构建插件，负责反编译 / 重映射 / 开发环境 | ❌ | **与兼容性完全无关，不要为了"兼容玩家"而降级** |
-| `yarn_mappings` | 编译期把混淆名映射为可读名 | ❌ | 只有更换编译目标 `minecraft_version` 时才需同步修改 |
-| `minecraft_version` | 编译目标 MC 版本 | ❌ | 见上一节：产物是 intermediary 命名空间的，只要符号存在就能跨版本运行 |
+| `loader_version` | **✅ 会写进 `depends.fabricloader`** | 编译期依赖 **+** 玩家门槛 | 取**能工作的最低版本**，不要用"当前最新"——否则白白挡住老玩家 |
+| `minecraft_version` / `_min` / `_max` | **✅ 会写进 `depends.minecraft`** | 编译目标 / 声明区间 | 见上一节，按符号验证结果定 |
+| `fabric_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" | 取该 MC 版本的**最早**一版（现为 `0.101.2+1.21.1`） |
+| `loom_version` | ❌ | Gradle 构建插件（反编译 / 重映射 / 开发环境） | 见下 |
+| `yarn_mappings` | ❌ | 编译期把混淆名映射为可读名 | 只有更换 `minecraft_version` 时才需同步改 |
+
+**`loader_version` 的取值**：本 Mod 用到的 loader 成员只有 7 个
+（`FabricLoader#getInstance/getConfigDir/getModContainer`、`ModContainer#getMetadata`、
+`ModMetadata#getVersion`、`Version#getFriendlyString`、`ModInitializer#onInitialize`），
+全部自 2019 年起就存在。当前取 **0.16.0**——即 MC 1.21.1 发布（2024-08-08）时的同期 loader
+（发布于 2024-07-11），已核验上述成员在 0.16.0 中全部存在。
+**Fabric Loader 同样是向后兼容的**（新版能跑旧模组），所以门槛设低只会放宽、不会收紧。
+
+**Loom 的取向与它们相反**：Loom 的版本要按**你打算编译的最高 MC 版本**来选——
+每次 Loom 发版基本对应当时最新的 MC，**新版 Loom 能处理旧 MC，旧版 Loom 处理不了更新的 MC**。
+所以不要为了"兼容玩家"而降级 Loom（玩家根本不会运行它），
+也不要为了编译旧 MC 而故意用很老的 Loom。参考发布节奏：
+
+| Loom | 发布时间 | 大致对应的 MC 世代 |
+|---|---|---|
+| 1.7 | 2024-06 | 1.21 / 1.21.1 |
+| 1.8 | 2024-10 | 1.21.2 – 1.21.4 |
+| 1.9 | 2024-12 | 1.21.4 |
+| 1.10 | 2025-02 | 1.21.5 |
+| 1.11 | 2025-07 | 1.21.6 – 1.21.8 |
+
+本项目编译目标为 1.21.1，Loom 1.7 起即可；当前用 1.11（已验证可用，且为将来提高编译目标留出余地）。
+建议把 `1.11-SNAPSHOT` 固定为确定版本（如 `1.11.8`），以免同一份代码在不同时间拉到不同 Loom。
 
 **Fabric API 是向后兼容的**：新版保留旧 API，因此用旧 API 编译的模组在新版 Fabric API 上照常运行；
 反过来才可能出问题。本 Mod 的 jar 里只引用了两个 Fabric API 类——
