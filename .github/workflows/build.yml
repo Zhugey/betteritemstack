@@ -2,9 +2,17 @@
 # and submitted pull request. This can help catch issues that only occur on
 # certain platforms or Java versions, and provides a first line of defence
 # against bad commits.
+#
+# 推送 tag（v1.0.1 / V1.0.1 之类）时，会额外从 CHANGELOG.md 抽取该版本的小节，
+# 自动创建 GitHub Release 并把 build/libs/*.jar 作为附件上传。
+# 详见文件末尾的两个步骤。
 
 name: build
 on: [pull_request, push]
+
+# gh release 需要写权限
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -28,3 +36,58 @@ jobs:
         with:
           name: Artifacts
           path: build/libs/
+
+      # ------------------------------------------------------------------
+      # 以下是"打 tag 时自动发布 Release"的部分。
+      # 普通 push / PR 不会执行（两个步骤都带 if 条件）。
+      # ------------------------------------------------------------------
+
+      - name: extract release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#[vV]}"
+          echo "标签：$TAG    版本：$VERSION"
+
+          # 抽取 "## <版本号>" 开头、到下一个标题或 --- 分隔线之前的内容
+          awk -v ver="$VERSION" '
+            BEGIN { pat = "^## " ver "([^0-9.]|$)" }
+            $0 ~ pat { found = 1; next }
+            found && ($0 ~ /^## / || $0 == "---") { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "::warning::CHANGELOG.md 中没有与 $VERSION 对应的小节，Release 正文将使用整个 CHANGELOG。"
+            cp CHANGELOG.md release-notes.md
+          fi
+
+          echo "-------- release-notes.md --------"
+          cat release-notes.md
+
+      - name: create release
+        if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/tags/V')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          JAR_DIR: ${{ github.workspace }}/build/libs
+        run: |
+          set -euo pipefail
+          ls -l "$JAR_DIR"
+
+          # 幂等：同一个 tag 重跑工作流时更新已有 Release，而不是报"已存在"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，改为更新。"
+            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md
+            gh release upload "$TAG" "$JAR_DIR"/*.jar --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              --verify-tag \
+              "$JAR_DIR"/*.jar
+          fi
+
+          echo "完成：$(gh release view "$TAG" --json url -q .url)"
