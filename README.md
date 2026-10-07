@@ -327,7 +327,7 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 | 1.21.5 – 1.21.10 | ❌ 需修改代码 | `ComponentHolder#get(ComponentType)` 与 `getOrDefault(...)` 被移除（该类只剩 `contains` 与 `getComponents`），`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效 |
 | 1.21.11 | ❌ 需修改代码 | 除上一条外，`CommandSource#hasPermissionLevel(int)` 被新的权限体系取代（`ServerCommandSource#permissions` / `withPermissions`），`/bis set`、`/bis reload` 的权限判定需改写 |
 
-上述结论都能用**静态检查**复现，不需要实机逐个版本运行。两道检查分别是：
+上述结论都能用**静态检查**复现，不需要实机逐个版本运行。三项检查分别是：
 
 1. **注入目标与符号引用核对** —— 从构建产物中提取 **Mixin 的注入目标**与 **class 常量池里的全部
    intermediary 引用**，逐个到 1.21.1 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
@@ -336,9 +336,17 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
    （`@At(target="Lnet/minecraft/class_1799;method_7914()I")`），此时须用 `javap -v` 从注解里读取。
    编译器以"静态接收类型"发出成员引用（如 `ItemStack.toString()`），而映射只收录声明该成员的类，
    因此继承/桥接方法要回退到全表查找，否则会误报。
-2. **`@Redirect` 调用次数核对** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
+2. **`@Shadow` 成员核对** —— Mixin 的 `@Shadow` 成员在构建时会被改名成目标类的 intermediary 名
+   （`field_xxxxx` / `method_xxxxx`），必须逐个确认该名称在目标版本里仍然存在。
+   这一类引用**不在常量池里**（声明属于 mixin 自身，而不是对目标类的引用），因此要单独扫出来。
+   **这一项极易遗漏**：本模组的 `ItemStack#ITEM_CODEC` 就是例子——该字段在 1.21.2 起被移除，
+   而只查常量池与注解的检查完全看不出来。
+3. **`@Redirect` 调用次数核对** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
    这类问题靠符号存在性检查发现不了，必须读字节码。直接取 Mojang 客户端产物，
    逐方法统计 `ItemStack#getMaxCount()` 的调用次数，确认 1.21.1 – 1.21.4 的调用画像完全一致（均为 1 次）。
+
+> 已知盲区：**构造函数与 `<clinit>`** 不在 intermediary 映射文件里（实测收录 0 条），
+> 无法用上述方式核对，需人工用 `javap` 取目标类签名再与 Yarn 映射对照。
 
 > 若要与 1.21.5+ 共用一份代码，需要把 `VanillaMax` 的组件读取改为新 API，并为 1.21.11+
 > 改写权限判定；这属于跨版本适配，超出当前 1.0.x 的范围。

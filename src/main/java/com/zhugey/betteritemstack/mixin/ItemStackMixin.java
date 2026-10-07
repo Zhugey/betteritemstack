@@ -10,7 +10,6 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.tooltip.TooltipType;
 import net.minecraft.registry.Registries;
-import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.dynamic.Codecs;
@@ -41,22 +40,28 @@ public abstract class ItemStackMixin {
     @Final
     public static Codec<ItemStack> CODEC;
 
-    @Shadow
-    @Final
-    public static Codec<RegistryEntry<Item>> ITEM_CODEC;
-
     /**
-     * <p>重写 ItemStack 的静态初始化方法中的 CODEC，使其支持最大堆叠数量为 Integer.MAX_VALUE。</p>
-     * <p>保证大堆叠的物品可以正常序列化和反序列化。</p>
+     * <p>重写 {@code ItemStack} 静态初始化块里的 CODEC，把 {@code count} 字段的取值上限
+     * 从原版的 99 放开到 {@link Integer#MAX_VALUE}，使大堆叠物品能正常序列化与反序列化。</p>
+     *
+     * <p><b>为什么不 {@code @Shadow} 原版的 {@code ITEM_CODEC}</b>：1.21.1 的
+     * {@code ItemStack#ITEM_CODEC}（intermediary 名为 {@code field_47312}）在 <b>1.21.2 起被移除</b>，
+     * 其定义被内联进 CODEC。若继续 {@code @Shadow} 它，Mixin 在 1.21.2+ 上应用时会抛
+     * {@code InvalidMixinException: @Shadow field field_47312 was not located ... No refMap loaded}，
+     * 客户端在 Bootstrap 阶段直接崩溃。</p>
+     *
+     * <p>这里改为直接调用 {@link Registries#ITEM}.{@code getEntryCodec()}——1.21.1 的原版
+     * ITEM_CODEC 本身就是用它构建的（原版只在其上多加了一层"不得为 minecraft:air"的 validate），
+     * 而该 API 在 1.21.1 – 1.21.4 全部存在，所以同一份代码可跨这四个版本运行。</p>
      *
      * @param ci Mixin 注入所需的 CallbackInfo
      */
     @Inject(method = "<clinit>", at = @At("TAIL"))
-    private static void overrideITEM_CODEC(CallbackInfo ci) {
+    private static void bis$allowLargeCounts(CallbackInfo ci) {
         CODEC = Codec.lazyInitialized(
                 () -> RecordCodecBuilder.create(
                         instance -> instance.group(
-                                        ITEM_CODEC.fieldOf("id").forGetter(ItemStack::getRegistryEntry),
+                                        Registries.ITEM.getEntryCodec().fieldOf("id").forGetter(ItemStack::getRegistryEntry),
                                         Codecs.rangedInt(1, Integer.MAX_VALUE).fieldOf("count").orElse(1).forGetter(ItemStack::getCount),
                                         ComponentChanges.CODEC.optionalFieldOf("components", ComponentChanges.EMPTY).forGetter(ItemStack::getComponentChanges)
                                 )

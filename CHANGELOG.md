@@ -12,6 +12,19 @@
 并放宽了对 Fabric Loader 的要求。**没有任何游戏内行为变更**：堆叠逻辑、指令、配置格式
 都与 1.0.1 完全一致，直接用新 jar 覆盖即可。
 
+### 修复
+
+- **修复在 1.21.2 / 1.21.3 / 1.21.4 上启动即崩溃。** 本模组通过 `@Shadow` 引用原版的
+  `ItemStack#ITEM_CODEC`，而该字段**在 1.21.2 起被移除**（其定义被内联进 `CODEC`）。
+  Mixin 应用时抛
+  `InvalidMixinException: @Shadow field field_47312 was not located in the target class net.minecraft.class_1799`，
+  客户端在 Bootstrap 阶段直接崩溃（1.0.1 因为把 `minecraft` 锁死在 1.21.1，掩盖了这个问题）。
+  现改为直接调用 `Registries.ITEM.getEntryCodec()`——这正是 1.21.1 原版构建 `ITEM_CODEC` 所用的 API，
+  在 1.21.1 – 1.21.4 均存在。1.21.1 上的行为不变（唯一差异：不再额外校验"物品 id 不得为
+  `minecraft:air`"，该差异只影响手工构造的非法存档数据）。
+- 上述版本区间结论已重新核对，这次把 **`@Shadow` 成员**也纳入了检查范围——此前遗漏的正是这一类，
+  它导致"1.21.4 可用"的结论一度错误。
+
 ### 兼容性
 
 - **支持的 Minecraft 版本由 1.21.1 扩展为 1.21.1 – 1.21.4**。1.0.1 的元数据把 `minecraft`
