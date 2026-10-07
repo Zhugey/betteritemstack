@@ -3,21 +3,18 @@
 	"id": "betteritemstack",
 	"version": "${version}",
 	"name": "BetterItemStack",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"description": "提升物品堆叠上限，并按容器类型分别控制：箱子、木桶、玩家背包等可堆到极大值，漏斗与漏斗矿车保持原版上限以维持红石计时器与计数器。",
 	"authors": [
-		"Me!"
+		"zhugey"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"sources": "https://github.com/Zhugey/betteritemstack",
+		"issues": "https://github.com/Zhugey/betteritemstack/issues"
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/betteritemstack/icon.png",
 	"environment": "*",
 	"entrypoints": {
-		"fabric-datagen": [
-			"com.zhugey.betteritemstack.BetterItemStackDataGenerator"
-		],
 		"main": [
 			"com.zhugey.betteritemstack.BetterItemStack"
 		]
@@ -30,8 +27,5 @@
 		"minecraft": "${minecraft_version}",
 		"java": ">=21",
 		"fabric-api": "*"
-	},
-	"suggests": {
-		"another-mod": "*"
 	}
 }

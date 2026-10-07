@@ -4,11 +4,11 @@
   "package": "com.zhugey.betteritemstack.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "DataComponentTypesMixin",
+    "HopperBlockEntityMixin",
     "InventoryMixin",
     "ItemEntityMixin",
-    "ItemMixin",
-    "ItemStackMixin"
+    "ItemStackMixin",
+    "SlotMixin"
   ],
   "injectors": {
     "defaultRequire": 1

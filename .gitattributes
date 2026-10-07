@@ -7,3 +7,6 @@
 # These are Windows script files and should use crlf
 *.bat           text eol=crlf
 
+# 语言文件由脚本生成，固定 lf，避免 checkout 时被转成 crlf 而产生虚假改动
+*.json          text eol=lf
+
