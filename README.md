@@ -177,7 +177,7 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 
 ## 安装
 
-1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)（≥ 0.16.14）
+1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)（≥ 0.16.1）
 2. 把 [Fabric API](https://modrinth.com/mod/fabric-api) 与本模组的 jar 一起放进 `mods/`
 3. 需要 **Java 21**，Minecraft 需为 **1.21.1 – 1.21.4** 之一
 
@@ -329,8 +329,11 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 核验方式（脚本在 `.workbuddy/tools/verify/`，可复跑）：
 
-1. **`mc_compat_check.py`** —— 从发布 jar 中提取 **refmap 的全部注入目标**与 **class 常量池里的全部
+1. **`mc_compat_check.py`** —— 从发布 jar 中提取 **Mixin 的注入目标**与 **class 常量池里的全部
    intermediary 引用**，逐个到 1.21.1 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
+   注入目标的存放形式随 Loom 版本而变，脚本两者都支持：旧 Loom 放在 `refmap.json` 里，
+   新 Loom（≥1.12）不再生成 refmap、而是把目标**就地重映射进注解**
+   （`@At(target="Lnet/minecraft/class_1799;method_7914()I")`），脚本会从注解里读取。
    编译器以"静态接收类型"发出成员引用（如 `ItemStack.toString()`），而映射只收录声明该成员的类，
    因此继承/桥接方法会回退到全表查找，避免误报。
 2. **`redirect_count_check.py`** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
@@ -350,37 +353,44 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 |---|---|---|---|
 | `loader_version` | **✅ 会写进 `depends.fabricloader`** | 编译期依赖 **+** 玩家门槛 | 取**能工作的最低版本**，不要用"当前最新"——否则白白挡住老玩家 |
 | `minecraft_version` / `_min` / `_max` | **✅ 会写进 `depends.minecraft`** | 编译目标 / 声明区间 | 见上一节，按符号验证结果定 |
-| `fabric_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" | 取该 MC 版本的**最早**一版（现为 `0.101.2+1.21.1`） |
+| `fabric_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" | 取该 MC 分支里**较早**的一版（现为 `0.102.1+1.21.1`） |
 | `loom_version` | ❌ | Gradle 构建插件（反编译 / 重映射 / 开发环境） | 见下 |
 | `yarn_mappings` | ❌ | 编译期把混淆名映射为可读名 | 只有更换 `minecraft_version` 时才需同步改 |
 
 **`loader_version` 的取值**：本 Mod 用到的 loader 成员只有 7 个
 （`FabricLoader#getInstance/getConfigDir/getModContainer`、`ModContainer#getMetadata`、
 `ModMetadata#getVersion`、`Version#getFriendlyString`、`ModInitializer#onInitialize`），
-全部自 2019 年起就存在。当前取 **0.16.0**——即 MC 1.21.1 发布（2024-08-08）时的同期 loader
-（发布于 2024-07-11），已核验上述成员在 0.16.0 中全部存在。
+全部自 2019 年起就存在。当前取 **0.16.1**——即 MC 1.21.1 发布（2024-08-08）前后的同期 loader，
+已核验上述成员在 0.16.x 中全部存在。
 **Fabric Loader 同样是向后兼容的**（新版能跑旧模组），所以门槛设低只会放宽、不会收紧。
 
 **Loom 的取向与它们相反**：Loom 的版本要按**你打算编译的最高 MC 版本**来选——
-每次 Loom 发版基本对应当时最新的 MC，**新版 Loom 能处理旧 MC，旧版 Loom 处理不了更新的 MC**。
-所以不要为了"兼容玩家"而降级 Loom（玩家根本不会运行它），
-也不要为了编译旧 MC 而故意用很老的 Loom。参考发布节奏：
+**新版 Loom 能处理旧 MC，旧版 Loom 处理不了更新的 MC**。所以不要为了"兼容玩家"而降级 Loom
+（玩家根本不会运行它）。Fabric 官网对每个 MC 版本都显示同一个 Loom，正是因为
+Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 
-| Loom | 发布时间 | 大致对应的 MC 世代 |
+但 Loom 硬性耦合 **Gradle** 与 **JDK**（取自 maven 元数据的
+`org.gradle.plugin.api-version` / `org.gradle.jvm.version` 字段）：
+
+| Loom | 要求的 Gradle | 要求的 JDK |
 |---|---|---|
-| 1.7 | 2024-06 | 1.21 / 1.21.1 |
-| 1.8 | 2024-10 | 1.21.2 – 1.21.4 |
-| 1.9 | 2024-12 | 1.21.4 |
-| 1.10 | 2025-02 | 1.21.5 |
-| 1.11 | 2025-07 | 1.21.6 – 1.21.8 |
+| 1.11.8 / 1.12.7 / **1.13.6** | **8.14** | **21** |
+| 1.14.10 / 1.15.5 | 9.2.0 | 21 |
+| 1.16.3 | 9.4.0 | 21 |
+| 1.17.21 | 9.5.0 | 21 |
+| 1.18.3 | 9.7.0 | 25 |
 
-本项目编译目标为 1.21.1，Loom 1.7 起即可；当前用 1.11（已验证可用，且为将来提高编译目标留出余地）。
-建议把 `1.11-SNAPSHOT` 固定为确定版本（如 `1.11.8`），以免同一份代码在不同时间拉到不同 Loom。
+本项目用 **Gradle 8.14.2 + JDK 21**，能用的最高 Loom 即 **1.13.6**（当前取值）。
+升到 1.14+ 需同步升 Gradle，1.18 还要 JDK 25，而这对玩家零收益。
+
+另外**不要用 `-SNAPSHOT`**：它是浮动版本，同一份代码在不同时间可能拉到不同快照，构建不可复现；
+永远固定到正式版。注意 **Loom 1.12 起不再生成 refmap**，改为把注解里的注入目标就地重映射为
+intermediary——上层提到的 `mc_compat_check.py` 已同时支持这两种形式。
 
 **Fabric API 是向后兼容的**：新版保留旧 API，因此用旧 API 编译的模组在新版 Fabric API 上照常运行；
 反过来才可能出问题。本 Mod 的 jar 里只引用了两个 Fabric API 类——
 `CommandRegistrationCallback` 与它的父类型 `Event`（2019 年即存在），
-所以 Fabric API 从 `0.101.2+1.21.1`（1.21.1 的最早版本）到最新版都能运行。
+所以 Fabric API 从 `0.102.1+1.21.1` 到该分支最新版都能运行。
 `depends.fabric-api` 因此保持 `*`（允许任意版本），不额外设下限以免误伤。
 
 ### 在哪里查版本
