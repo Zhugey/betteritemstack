@@ -2,7 +2,8 @@ plugins {
 	id 'fabric-loom' version "${loom_version}"
 }
 
-version = project.mod_version + "-" + project.minecraft_version
+// 产物名带上"支持的 MC 区间"而不是编译目标，避免出现"文件名写着 1.21.1、实际支持到 1.21.4"的误导。
+version = project.mod_version + "-" + project.minecraft_version_min + "-" + project.minecraft_version_max
 group = project.maven_group
 
 base {
@@ -23,12 +24,16 @@ dependencies {
 //（Gradle 10.0 起为错误，且与配置缓存不兼容）。
 def modVersion = project.version
 def mcVersion = project.minecraft_version
+def mcVersionMin = project.minecraft_version_min
+def mcVersionMax = project.minecraft_version_max
 def loaderVersion = project.loader_version
 def licenseFilePrefix = project.archives_base_name
 
 processResources {
 	inputs.property "version", modVersion
 	inputs.property "minecraft_version", mcVersion
+	inputs.property "minecraft_version_min", mcVersionMin
+	inputs.property "minecraft_version_max", mcVersionMax
 	inputs.property "loader_version", loaderVersion
 	// 必须写成赋值形式：filteringCharset "UTF-8" 这种"属性名 值"的空格调用写法已弃用。
 	filteringCharset = "UTF-8"
@@ -36,6 +41,8 @@ processResources {
 	filesMatching("fabric.mod.json") {
 		expand "version": modVersion,
 				"minecraft_version": mcVersion,
+				"minecraft_version_min": mcVersionMin,
+				"minecraft_version_max": mcVersionMax,
 				"loader_version": loaderVersion
 	}
 }

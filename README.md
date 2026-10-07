@@ -4,7 +4,8 @@
 > 箱子、木桶、潜影盒、玩家背包可以堆到极大值；**漏斗与漏斗矿车保持原版上限**，
 > 红石计时器与计数器因此不受影响。
 
-- Minecraft **1.21.1** / Fabric / Java 21
+- 支持 Minecraft **1.21.1 – 1.21.4**（同一个 jar 直接可用，无需按版本分开构建）
+- 编译目标 1.21.1 / Fabric / Java 21
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
 - 仓库：<https://github.com/Zhugey/betteritemstack>
 
@@ -178,7 +179,7 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 
 1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)（≥ 0.16.14）
 2. 把 [Fabric API](https://modrinth.com/mod/fabric-api) 与本模组的 jar 一起放进 `mods/`
-3. 需要 **Java 21**
+3. 需要 **Java 21**，Minecraft 需为 **1.21.1 – 1.21.4** 之一
 
 ---
 
@@ -312,6 +313,35 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 ---
 
+## 版本兼容性
+
+本 Mod 的 jar 是 **intermediary 命名空间**的产物：Mixin 目标与 API 调用在发布时已被重映射为
+`class_xxxx` / `method_xxxxx`，运行期由 Fabric 映射到当前版本的混淆名。
+**因此只要这些符号在目标版本里依旧存在，同一个 jar 就能直接运行，无需针对每个版本重新编译。**
+
+据此逐版本核验的结果：
+
+| Minecraft | 结论 | 原因 |
+|---|---|---|
+| **1.21.1 – 1.21.4** | ✅ **同一个 jar 直接可用** | 全部符号与字节码调用画像一致 |
+| 1.21.5 – 1.21.10 | ❌ 需修改代码 | `ComponentHolder#get(ComponentType)` 与 `getOrDefault(...)` 被移除（该类只剩 `contains` 与 `getComponents`），`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效 |
+| 1.21.11 | ❌ 需修改代码 | 除上一条外，`CommandSource#hasPermissionLevel(int)` 被新的权限体系取代（`ServerCommandSource#permissions` / `withPermissions`），`/bis set`、`/bis reload` 的权限判定需改写 |
+
+核验方式（脚本在 `.workbuddy/tools/verify/`，可复跑）：
+
+1. **`mc_compat_check.py`** —— 从发布 jar 中提取 **refmap 的全部注入目标**与 **class 常量池里的全部
+   intermediary 引用**，逐个到 1.21.1 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
+   编译器以"静态接收类型"发出成员引用（如 `ItemStack.toString()`），而映射只收录声明该成员的类，
+   因此继承/桥接方法会回退到全表查找，避免误报。
+2. **`redirect_count_check.py`** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
+   这类问题符号存在性检查发现不了。该脚本直接读 Mojang 客户端字节码，逐方法统计
+   `ItemStack#getMaxCount()` 的调用次数，确认 1.21.1 – 1.21.4 的调用画像完全一致（均为 1 次）。
+
+> 若要与 1.21.5+ 共用一份代码，需要把 `VanillaMax` 的组件读取改为新 API，并为 1.21.11+
+> 改写权限判定；这属于跨版本适配，超出当前 1.0.x 的范围。
+
+---
+
 ## 兼容性与已知限制
 
 1. **漏斗自己保持原版**：只能装到原版上限，因此以 16 / 64 计数的红石计时器与计数器不受影响。
@@ -340,8 +370,11 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 产物位于 `build/libs/`：
 
-- `BetterItemStack-<版本>-1.21.1.jar` — 实际使用的模组文件
-- `BetterItemStack-<版本>-1.21.1-sources.jar` — 源码
+- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 实际使用的模组文件（如 `BetterItemStack-1.0.1-1.21.1-1.21.4.jar`）
+- `BetterItemStack-<Mod版本>-<MC区间>-sources.jar` — 源码
+
+产物名里的版本区间取自 `gradle.properties` 的 `minecraft_version_min` / `minecraft_version_max`，
+与 `fabric.mod.json` 中 `depends.minecraft` 的区间同源。
 
 提交或拉取请求后，`.github/workflows/build.yml` 会在 GitHub Actions 上自动构建，
 并把产物作为 Artifacts 上传（保留 90 天）。
