@@ -96,17 +96,26 @@ jobs:
           TITLE="$TAG (Minecraft $MC_MIN–$MC_MAX)"
           echo "Release 标题：$TITLE"
 
+          # 只上传主 jar，排除 -sources.jar。
+          # 当前配置已不再生成 sources jar，但历史 tag 指向的旧提交仍会生成它，
+          # 万一重跑那些 tag，这里保证 Release 不会被重新塞进多余文件。
+          JARS=()
+          for f in "$JAR_DIR"/*.jar; do
+            case "$f" in *-sources.jar) echo "跳过 $f" ;; *) JARS+=("$f") ;; esac
+          done
+          echo "将上传：${JARS[*]}"
+
           # 幂等：同一个 tag 重跑工作流时更新已有 Release，而不是报"已存在"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，改为更新。"
             gh release edit "$TAG" --title "$TITLE" --notes-file release-notes.md
-            gh release upload "$TAG" "$JAR_DIR"/*.jar --clobber
+            gh release upload "$TAG" "${JARS[@]}" --clobber
           else
             gh release create "$TAG" \
               --title "$TITLE" \
               --notes-file release-notes.md \
               --verify-tag \
-              "$JAR_DIR"/*.jar
+              "${JARS[@]}"
           fi
 
           echo "完成：$(gh release view "$TAG" --json url -q .url)"
