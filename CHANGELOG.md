@@ -6,7 +6,52 @@
 
 ---
 
-## 1.1.0 — 2026-10-08
+## 1.2.0 — 2026-10-08
+
+**1.21.11 分支的首个版本**，只支持 **Minecraft 1.21.11**。
+下文 1.1.x 是 1.21.5 分支（1.21.5 – 1.21.10）的发布历史，1.0.x 是 1.21.1 分支（1.21.1 – 1.21.4）
+的发布历史，三条线并行维护。
+
+### 为什么必须单独出一条分支
+
+1.21.11 是 1.21.x 系列的最后一个正式版，也是**权限体系换代**的那一版：
+原先用来判断 OP 的 `CommandSource#hasPermissionLevel(int)`（intermediary `method_9259`）
+被整套新的权限模型取代（`PermissionLevel` / `PermissionCheck` / `DefaultPermissions` /
+`PermissionPredicate` 等）。1.1.x 的产物里带着对旧方法的调用，在 1.21.11 上会因符号不存在而无法启动，
+所以 1.1.x 的 jar 不适用于本版本。
+
+### 适配内容
+
+- **权限判定改写为新 API**：`/bis set` 与 `/bis reload` 原来的 `hasPermissionLevel(1)`
+  改为 `CommandManager.requirePermissionLevel(CommandManager.MODERATORS_CHECK)`。
+  等级 1 在新体系里就是 `PermissionLevel.MODERATORS`（0 = ALL、1 = MODERATORS、2 = GAMEMASTERS、
+  3 = ADMINS、4 = OWNERS），写法与原版 `GameModeCommand` 完全一致，**语义与改动前相同**。
+- 除这一处外**没有任何代码改动**：堆叠逻辑、容器策略、指令、配置格式、语言文件均与 1.1.0 一致。
+- 构建版本号：编译目标与声明区间均为 1.21.11，Yarn `1.21.11+build.6`，Fabric API `0.139.5+1.21.11`，
+  Loom 仍为 1.13.6（Loom 与 MC 版本解耦，无需跟着换）。
+
+### 兼容性
+
+- **仅支持 Minecraft 1.21.11**。产物名与 Mod 显示名都不再重复写两遍版本号
+  （单版本分支：`BetterItemStack-1.2.0-1.21.11.jar`、显示名 `BetterItemStack 1.21.11`）。
+- **不适用于 1.21.10 及以下**：本构建引用的新权限 API 在那些版本里不存在，
+  请改用 **1.21.5 分支**（1.21.5 – 1.21.10）或 **1.21.1 分支**（1.21.1 – 1.21.4）的产物。
+- **不适用于 26.1 及以上**：权限 API 又有变动；而且 Minecraft 从 26.1 起**运行时要求 Java 25**。
+- 需要 Fabric Loader **≥ 0.18.2**、Fabric API、**Java 21**（1.21.11 仍属 Java 21 区间，
+  Java 25 从 26.1 才开始要求）。
+
+### 验证
+
+- **符号核查**：本构建用到的全部 intermediary 类与成员在 1.21.11 中均存在（1.21.11 ✅）。
+- **`@Redirect` 调用次数**：三处目标方法（漏斗的 `transfer` / `isFull` / `isInventoryFull`）内
+  `ItemStack#getMaxCount()` 的调用次数均为 **1 次**，与历史版本一致。
+- **注入点重映射**：六处 Mixin 的注入目标已全部就地重映射为 intermediary
+  （换编译目标后最易踩的静默坑，本次逐条确认）。
+- **人工核对工具盲区**：1.21.11 的 `ItemStack` 存在 `<clinit>`、`(RegistryEntry, int, ComponentChanges)`
+  构造函数存在、`CODEC` 字段仍在。
+- 构建 **0 诊断**。
+
+---
 
 **1.21.5 分支的首个版本**，支持 **Minecraft 1.21.5 – 1.21.10**。
 下文的 1.0.x 小节记录的是 1.21.1 分支（支持 1.21.1 – 1.21.4）的发布历史，两线并行维护。

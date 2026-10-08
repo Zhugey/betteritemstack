@@ -2,8 +2,8 @@
 	"schemaVersion": 1,
 	"id": "betteritemstack",
 	"version": "${version}",
-	"name": "BetterItemStack ${minecraft_version_min}-${minecraft_version_max}",
-	"description": "提升物品堆叠上限，并按容器类型分别控制：箱子、木桶、玩家背包等可堆到极大值，漏斗与漏斗矿车保持原版上限以维持红石计时器与计数器。支持 Minecraft ${minecraft_version_min} – ${minecraft_version_max}。",
+	"name": "BetterItemStack ${minecraft_version_range}",
+	"description": "提升物品堆叠上限，并按容器类型分别控制：箱子、木桶、玩家背包等可堆到极大值，漏斗与漏斗矿车保持原版上限以维持红石计时器与计数器。支持 Minecraft ${minecraft_version_range}。",
 	"authors": [
 		"zhugey"
 	],

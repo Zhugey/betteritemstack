@@ -220,12 +220,17 @@ public class BetterItemStack implements ModInitializer {
                             .executes(BetterItemStack::executeInfo))
                     // /bis set <global_max> 子命令
                     .then(CommandManager.literal("set")
-                            .requires(source -> source.hasPermissionLevel(1)) // 仅 OP 可用
+                            // 仅 OP 可用（等级 1）。
+                            // 1.21.11 起 CommandSource#hasPermissionLevel(int) 被新的权限体系取代
+                            // （PermissionLevel / PermissionCheck / DefaultPermissions），
+                            // 等级 1 现在对应 DefaultPermissions.MODERATORS，
+                            // 原版 GameModeCommand 用的就是 .requires(CommandManager.requirePermissionLevel(...)) 这种写法。
+                            .requires(CommandManager.requirePermissionLevel(CommandManager.MODERATORS_CHECK))
                             .then(CommandManager.argument("global_max", IntegerArgumentType.integer())
                                     .executes(BetterItemStack::executeSet)))
                     // /bis reload 子命令
                     .then(CommandManager.literal("reload")
-                            .requires(source -> source.hasPermissionLevel(1))
+                            .requires(CommandManager.requirePermissionLevel(CommandManager.MODERATORS_CHECK))
                             .executes(BetterItemStack::executeReload))
             );
         });

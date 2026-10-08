@@ -3,7 +3,11 @@ plugins {
 }
 
 // 产物名带上"支持的 MC 区间"而不是编译目标，避免出现"文件名写着 1.21.1、实际支持到 1.21.4"的误导。
-version = project.mod_version + "-" + project.minecraft_version_min + "-" + project.minecraft_version_max
+// 单版本分支（min == max，例如 1.21.11）不重复写两遍，产物名与 Mod 显示名都直接用那一个版本号。
+def mcRange = project.minecraft_version_min == project.minecraft_version_max
+		? project.minecraft_version_min
+		: project.minecraft_version_min + "-" + project.minecraft_version_max
+version = project.mod_version + "-" + mcRange
 group = project.maven_group
 
 base {
@@ -34,6 +38,7 @@ processResources {
 	inputs.property "minecraft_version", mcVersion
 	inputs.property "minecraft_version_min", mcVersionMin
 	inputs.property "minecraft_version_max", mcVersionMax
+	inputs.property "minecraft_version_range", mcRange
 	inputs.property "loader_version", loaderVersion
 	// 必须写成赋值形式：filteringCharset "UTF-8" 这种"属性名 值"的空格调用写法已弃用。
 	filteringCharset = "UTF-8"
@@ -43,6 +48,7 @@ processResources {
 				"minecraft_version": mcVersion,
 				"minecraft_version_min": mcVersionMin,
 				"minecraft_version_max": mcVersionMax,
+				"minecraft_version_range": mcRange,
 				"loader_version": loaderVersion
 	}
 }

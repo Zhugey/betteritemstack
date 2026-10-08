@@ -5,7 +5,8 @@
 #
 # 推送任意 tag（v1.0.1 / 1.0.1 / V1.0.1 均可）时，会额外从 CHANGELOG.md 抽取该版本的小节，
 # 自动创建 GitHub Release 并把 build/libs/*.jar 作为附件上传。
-# Release 标题会带上本分支的 MC 支持区间，形如 "v1.1.0 (Minecraft 1.21.5–1.21.10)"。
+# Release 标题会带上本分支的 MC 支持区间，形如 "v1.1.0 (Minecraft 1.21.5–1.21.10)"；
+# 单版本分支（min == max）只写一次，形如 "v1.2.0 (Minecraft 1.21.11)"。
 # 详见文件末尾的两个步骤。
 #
 # 注意：不要在这里把条件收紧成只认 "v" 前缀。曾经因为写成 refs/tags/v*，
@@ -93,7 +94,9 @@ jobs:
           # 这样从 tag 列表里也能一眼看出该版本覆盖哪些 MC 版本。
           MC_MIN=$(sed -n 's/^minecraft_version_min=//p' gradle.properties | tr -d '[:space:]')
           MC_MAX=$(sed -n 's/^minecraft_version_max=//p' gradle.properties | tr -d '[:space:]')
-          TITLE="$TAG (Minecraft $MC_MIN–$MC_MAX)"
+          # 单版本分支（min == max）只写一次，避免出现 "1.21.11–1.21.11"
+          if [ "$MC_MIN" = "$MC_MAX" ]; then MC_RANGE="$MC_MIN"; else MC_RANGE="$MC_MIN–$MC_MAX"; fi
+          TITLE="$TAG (Minecraft $MC_RANGE)"
           echo "Release 标题：$TITLE"
 
           # 只上传主 jar，排除 -sources.jar。
