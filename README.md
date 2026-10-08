@@ -324,8 +324,8 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 | Minecraft | 结论 | 原因 |
 |---|---|---|
 | **1.21.1 – 1.21.4** | ✅ **同一个 jar 直接可用** | 全部符号与字节码调用画像一致 |
-| 1.21.5 – 1.21.10 | ❌ 需修改代码 | `ComponentHolder#get(ComponentType)` 与 `getOrDefault(...)` 被移除（该类只剩 `contains` 与 `getComponents`），`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效 |
-| 1.21.11 | ❌ 需修改代码 | 除上一条外，`CommandSource#hasPermissionLevel(int)` 被新的权限体系取代（`ServerCommandSource#permissions` / `withPermissions`），`/bis set`、`/bis reload` 的权限判定需改写 |
+| 1.21.5 – 1.21.10 | ❌ **本分支不适用** | `ComponentHolder#get(ComponentType)` 与 `getOrDefault(...)` 被移除（该类只剩 `contains` 与 `getComponents`），`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效。请改用 **1.21.5 分支**的产物 |
+| 1.21.11 | ❌ **本分支不适用** | 除上一条外，权限体系也换代：`CommandSource#hasPermissionLevel(int)` 被新的 `PermissionPredicate` 体系取代。请改用 **1.21.11 分支**的产物 |
 
 上述结论都能用**静态检查**复现，不需要实机逐个版本运行。三项检查分别是：
 
@@ -348,8 +348,9 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 > 已知盲区：**构造函数与 `<clinit>`** 不在 intermediary 映射文件里（实测收录 0 条），
 > 无法用上述方式核对，需人工用 `javap` 取目标类签名再与 Yarn 映射对照。
 
-> 若要与 1.21.5+ 共用一份代码，需要把 `VanillaMax` 的组件读取改为新 API，并为 1.21.11+
-> 改写权限判定；这属于跨版本适配，超出当前 1.0.x 的范围。
+> **1.21.5 – 1.21.10 与 1.21.11 都已经单独出了分支**（见 **1.21.5 分支** 与 **1.21.11 分支**）：
+> 前者要把 `VanillaMax` 的组件读取改为新 API，后者还要一并改写权限判定；
+> 都属于跨版本适配，超出当前 1.0.x 的范围。
 
 ### `gradle.properties` 里的版本号分别管什么
 
