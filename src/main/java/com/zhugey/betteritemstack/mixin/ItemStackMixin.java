@@ -8,7 +8,10 @@ import net.minecraft.component.DataComponentTypes;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.tooltip.TooltipType;
+// 1.20.5 里这个类在 client 包下；1.21 起被移到了 net.minecraft.item.tooltip。
+// 注意它是同一个 intermediary 类（class_1836），只是 Yarn 包名变了 ——
+// 所以"符号核查通过"并不等于"源码能编译"，跨版本移植时以编译器为准。
+import net.minecraft.client.item.TooltipType;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;

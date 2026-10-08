@@ -4,10 +4,14 @@
 > 箱子、木桶、潜影盒、玩家背包可以堆到极大值；**漏斗与漏斗矿车保持原版上限**，
 > 红石计时器与计数器因此不受影响。
 
-- 支持 Minecraft **1.21.1 – 1.21.4**（同一个 jar 直接可用，无需按版本分开构建）
-- 编译目标 1.21.1 / Fabric / Java 21
+- 支持 Minecraft **1.20.5 – 1.21.4**（同一个 jar 直接可用，无需按版本分开构建）
+- 编译目标 1.20.5 / Fabric / Java 21
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
 - 仓库：<https://github.com/Zhugey/betteritemstack>
+
+> 本分支对应 Minecraft **1.20.5 – 1.21.4**。若你使用 **1.21.5 – 1.21.10**，请改用 **1.21.5 分支**的产物；
+> 使用 **1.21.11** 则改用 **1.21.11 分支**的产物——
+> 各分支针对自己的编译目标产出 intermediary 命名空间的 jar，不能互换。
 
 ---
 
@@ -177,9 +181,9 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 
 ## 安装
 
-1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)（≥ 0.16.1）
+1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)（≥ 0.15.11）
 2. 把 [Fabric API](https://modrinth.com/mod/fabric-api) 与本模组的 jar 一起放进 `mods/`
-3. 需要 **Java 21**，Minecraft 需为 **1.21.1 – 1.21.4** 之一
+3. 需要 **Java 21**，Minecraft 需为 **1.20.5 – 1.21.4** 之一
 
 ---
 
@@ -323,14 +327,15 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 | Minecraft | 结论 | 原因 |
 |---|---|---|
-| **1.21.1 – 1.21.4** | ✅ **同一个 jar 直接可用** | 全部符号与字节码调用画像一致 |
-| 1.21.5 – 1.21.10 | ❌ **本分支不适用** | `ComponentHolder#get(ComponentType)` 与 `getOrDefault(...)` 被移除（该类只剩 `contains` 与 `getComponents`），`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效。请改用 **1.21.5 分支**的产物 |
+| **1.20.5 – 1.21.4** | ✅ **同一个 jar 直接可用** | 全部符号与字节码调用画像一致 |
+| 1.21.5 – 1.21.10 | ❌ **本分支不适用** | 1.21.5 起组件读取方法换了接口体系，`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效。请改用 **1.21.5 分支**的产物 |
 | 1.21.11 | ❌ **本分支不适用** | 除上一条外，权限体系也换代：`CommandSource#hasPermissionLevel(int)` 被新的 `PermissionPredicate` 体系取代。请改用 **1.21.11 分支**的产物 |
+| 1.20 – 1.20.4 | ❌ **本分支不适用** | 这一代还没有"栈上限重构"（缺 `Inventory#getMaxCount(ItemStack)`，组件类也尚不存在），且运行环境是 **Java 17**，需要另行单独适配 |
 
 上述结论都能用**静态检查**复现，不需要实机逐个版本运行。三项检查分别是：
 
 1. **注入目标与符号引用核对** —— 从构建产物中提取 **Mixin 的注入目标**与 **class 常量池里的全部
-   intermediary 引用**，逐个到 1.21.1 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
+   intermediary 引用**，逐个到 1.20.5 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
    注入目标的存放形式随 Loom 版本而变，两种都要覆盖：旧 Loom 放在 `refmap.json` 里，
    新 Loom（≥1.12）不再生成 refmap、而是把目标**就地重映射进注解**
    （`@At(target="Lnet/minecraft/class_1799;method_7914()I")`），此时须用 `javap -v` 从注解里读取。
@@ -343,14 +348,21 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
    而只查常量池与注解的检查完全看不出来。
 3. **`@Redirect` 调用次数核对** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
    这类问题靠符号存在性检查发现不了，必须读字节码。直接取 Mojang 客户端产物，
-   逐方法统计 `ItemStack#getMaxCount()` 的调用次数，确认 1.21.1 – 1.21.4 的调用画像完全一致（均为 1 次）。
+   逐方法统计 `ItemStack#getMaxCount()` 的调用次数，确认区间两端（1.20.5 与 1.21.4）
+   的调用画像完全一致（均为 1 次）。
 
 > 已知盲区：**构造函数与 `<clinit>`** 不在 intermediary 映射文件里（实测收录 0 条），
 > 无法用上述方式核对，需人工用 `javap` 取目标类签名再与 Yarn 映射对照。
+> 另有一类它**查不出**的问题：同一个 intermediary 类的 **Yarn 包名/类名被改动**。
+> 本分支就踩过一次 —— `class_1836`（工具提示的类型参数）在 1.20.5 叫
+> `net.minecraft.client.item.TooltipType`，1.21 起才改成 `net.minecraft.item.tooltip.TooltipType`；
+> 符号核查全过，但按 1.21 的包名写会因为"程序包不存在"而编译失败。
+> **结论：符号核查负责"能不能运行"，"能不能编译"仍以编译器为准。**
 
 > **1.21.5 – 1.21.10 与 1.21.11 都已经单独出了分支**（见 **1.21.5 分支** 与 **1.21.11 分支**）：
-> 前者要把 `VanillaMax` 的组件读取改为新 API，后者还要一并改写权限判定；
-> 都属于跨版本适配，超出当前 1.0.x 的范围。
+> 前者要把 `VanillaMax` 的组件读取改为新 API，后者还要一并改写权限判定。
+> **1.20 – 1.20.4 则属于更早的一代**（Java 17、没有栈上限重构），同样需要单独一条分支。
+> 这些都属于跨版本适配，不在 1.0.x 的范围。
 
 ### `gradle.properties` 里的版本号分别管什么
 
@@ -362,15 +374,15 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 |---|---|---|---|
 | `loader_version` | **✅ 会写进 `depends.fabricloader`** | 编译期依赖 **+** 玩家门槛 | 取**能工作的最低版本**，不要用"当前最新"——否则白白挡住老玩家 |
 | `minecraft_version` / `_min` / `_max` | **✅ 会写进 `depends.minecraft`** | 编译目标 / 声明区间 | 见上一节，按符号验证结果定 |
-| `fabric_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" | 取该 MC 分支里**较早**的一版（现为 `0.102.1+1.21.1`） |
+| `fabric_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" | 取该 MC 分支里**较早**的一版（现为 `0.97.6+1.20.5`；该分支最早是 `0.91.4+1.20.5`） |
 | `loom_version` | ❌ | Gradle 构建插件（反编译 / 重映射 / 开发环境） | 见下 |
 | `yarn_mappings` | ❌ | 编译期把混淆名映射为可读名 | 只有更换 `minecraft_version` 时才需同步改 |
 
 **`loader_version` 的取值**：本 Mod 用到的 loader 成员只有 7 个
 （`FabricLoader#getInstance/getConfigDir/getModContainer`、`ModContainer#getMetadata`、
 `ModMetadata#getVersion`、`Version#getFriendlyString`、`ModInitializer#onInitialize`），
-全部自 2019 年起就存在。当前取 **0.16.1**——即 MC 1.21.1 发布（2024-08-08）前后的同期 loader，
-已核验上述成员在 0.16.x 中全部存在。
+全部自 2019 年起就存在。当前取 **0.15.11**——即 MC 1.20.5 发布（2024-04-23）前后的同期 loader，
+编译通过本身就是"这些成员在 0.15.11 中仍然存在"的证据。
 **Fabric Loader 同样是向后兼容的**（新版能跑旧模组），所以门槛设低只会放宽、不会收紧。
 
 **Loom 的取向与它们相反**：Loom 的版本要按**你打算编译的最高 MC 版本**来选——
@@ -400,7 +412,7 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 **Fabric API 是向后兼容的**：新版保留旧 API，因此用旧 API 编译的模组在新版 Fabric API 上照常运行；
 反过来才可能出问题。本 Mod 的 jar 里只引用了两个 Fabric API 类——
 `CommandRegistrationCallback` 与它的父类型 `Event`（2019 年即存在），
-所以 Fabric API 从 `0.102.1+1.21.1` 到该分支最新版都能运行。
+所以 Fabric API 从 `0.97.6+1.20.5` 到该分支最新版都能运行。
 `depends.fabric-api` 因此保持 `*`（允许任意版本），不额外设下限以免误伤。
 
 ### 在哪里查版本
@@ -445,7 +457,7 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 
 产物位于 `build/libs/`，只有一个文件：
 
-- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 模组文件本身（如 `BetterItemStack-1.0.2-1.21.1-1.21.4.jar`）
+- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 模组文件本身（如 `BetterItemStack-1.0.3-1.20.5-1.21.4.jar`）
 
 本项目**不生成 `-sources.jar`**（Fabric 官方示例模板里的 `withSourcesJar()` 已去掉）：源码本来就在
 仓库里公开，那个文件只对"把本模组当依赖库引用、需要在 IDE 里挂源码"的开发者有意义，
@@ -466,18 +478,18 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 3. 提交并推送，然后打 tag 推送：
 
    ```bash
-   git tag v1.0.2
-   git push origin v1.0.2
+   git tag v1.0.3
+   git push origin v1.0.3
    ```
 
-工作流会构建、从 `CHANGELOG.md` 抽取 `## 1.0.2` 一节作为 Release 正文，
+工作流会构建、从 `CHANGELOG.md` 抽取 `## 1.0.3` 一节作为 Release 正文，
 并把 `build/libs/*.jar` 作为附件上传。同一个 tag 重跑时会**更新**已有 Release，不会报错。
 
-tag 名带不带 `v` 前缀都可以（`v1.0.2` 与 `1.0.2` 等价，抽取时会自动剥掉前缀）；
-`+` 之后的内容会被忽略，所以将来若要写 `v1.0.3+mc1.21.1-1.21.4` 这类 semver 元数据也能正确抽取。
+tag 名带不带 `v` 前缀都可以（`v1.0.3` 与 `1.0.3` 等价，抽取时会自动剥掉前缀）；
+`+` 之后的内容会被忽略，所以将来若要写 `v1.0.3+mc1.20.5-1.21.4` 这类 semver 元数据也能正确抽取。
 
 > **tag 只用版本号，不要把 MC 区间写进去。** 区间已经出现在三个更合适的位置：产物文件名、
-> Release 标题（CI 会自动拼成 `v1.0.2 (Minecraft 1.21.1–1.21.4)`），以及上文的兼容性表。
+> Release 标题（CI 会自动拼成 `v1.0.3 (Minecraft 1.20.5–1.21.4)`），以及上文的兼容性表。
 > 把区间塞进 tag（例如 `V1.0.1_1.21.1-1.21.4`）会有实际代价：CI 是拿 tag 名去 `CHANGELOG.md`
 > 里找 `## <版本号>` 小节，归一化后的名字匹配不上，就会**静默回退**成把整份更新日志当成 Release 正文。
 > 主流模组（AppleSkin、JEI、REI、Botania、Mod Menu 等）同样只用纯版本号作 tag。
@@ -487,7 +499,7 @@ tag 名带不带 `v` 前缀都可以（`v1.0.2` 与 `1.0.2` 等价，抽取时�
 | 步骤 | 操作 |
 |---|---|
 | 推送代码 | 右上角工具栏的 **↑（Push）**，或菜单 `Git` → `Push...`（`Ctrl+Shift+K`）；对话框里确认提交后点 `Push` |
-| 打 tag | `Git` → `New Tag...`（旧版在 `VCS` → `Git` → `New Tag...`）；或在 Git 日志中**右键最新提交** → `New Tag...`，填 `v1.0.2` |
+| 打 tag | `Git` → `New Tag...`（旧版在 `VCS` → `Git` → `New Tag...`）；或在 Git 日志中**右键最新提交** → `New Tag...`，填 `v1.0.3` |
 | 推送 tag | 再次 `Git` → `Push...`，**务必勾选对话框底部的 `Push tags`**，下拉选 `All`，再点 `Push` |
 
 > **最容易漏掉的一步是最后一个**：tag 只创建在本地时不会触发任何 CI，"产物没更新"往往就出在这里。
