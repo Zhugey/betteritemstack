@@ -56,7 +56,11 @@ java {
 	if (JavaVersion.current() < JavaVersion.toVersion(21)) {
 		toolchain.languageVersion = JavaLanguageVersion.of(21)
 	}
-	withSourcesJar()
+	// 刻意不调用 withSourcesJar()。本模组只通过 GitHub Release 分发给玩家，
+	// 源码本来就在仓库里公开，附一个 -sources.jar 对玩家没有意义
+	// （Mod Menu / REI / Iris / AppleSkin 等流行模组的 Release 也都只放主 jar）。
+	// 该产物原本来自 Fabric 官方示例模板，示例模板同时还演示发布到 Maven，
+	// 那种场景下 sources jar 才有用（供依赖方在 IDE 里挂源码）。
 }
 
 jar {

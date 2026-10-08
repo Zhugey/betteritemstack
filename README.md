@@ -442,10 +442,13 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 ./gradlew runServer    # 启动开发环境服务端
 ```
 
-产物位于 `build/libs/`：
+产物位于 `build/libs/`，只有一个文件：
 
-- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 实际使用的模组文件（如 `BetterItemStack-1.0.2-1.21.1-1.21.4.jar`）
-- `BetterItemStack-<Mod版本>-<MC区间>-sources.jar` — 源码
+- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 模组文件本身（如 `BetterItemStack-1.0.2-1.21.1-1.21.4.jar`）
+
+本项目**不生成 `-sources.jar`**（Fabric 官方示例模板里的 `withSourcesJar()` 已去掉）：源码本来就在
+仓库里公开，那个文件只对"把本模组当依赖库引用、需要在 IDE 里挂源码"的开发者有意义，
+对下载安装的玩家没有用处，主流模组发布时也不附它。
 
 产物名里的版本区间取自 `gradle.properties` 的 `minecraft_version_min` / `minecraft_version_max`，
 与 `fabric.mod.json` 中 `depends.minecraft` 的区间同源。
