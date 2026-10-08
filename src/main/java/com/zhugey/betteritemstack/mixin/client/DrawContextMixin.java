@@ -10,26 +10,35 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
 
 /**
- * <p>通过 Mixin 修改 DrawContext 类，用于在物品栏中显示堆叠数时格式化大数字。
- * <p>将超过 1000 的数字格式化为 K、M、B 单位，并添加颜色标识。
+ * <p>通过 Mixin 修改 {@code DrawContext} 在物品栏格子里显示堆叠数的方式，把大数字格式化为
+ * K / M / B 单位并着色。</p>
+ *
+ * <p><b>1.21.5 的方法改名（重要）</b>：本注入的目标方法在 1.21.1 – 1.21.4 叫
+ * {@code drawItemInSlot}，1.21.5 起改名为 {@code drawStackOverlay}——但它是<b>同一个成员</b>
+ * （intermediary 名始终是 {@code method_51432}，描述符也一致）。
+ * Mixin 注解里必须写 Yarn 名，而 Loom 的映射里找不到旧名时**不会报错**，只会把字符串原样留在
+ * 注解里，导致运行期注入失败。故本分支必须用新名 {@code drawStackOverlay}。</p>
+ *
+ * <p>语义未变：1.21.5 的 {@code drawStackOverlay} 只是把那个表示"数量覆盖文本"的
+ * {@code String} 参数原样转发给新拆出的 {@code drawStackCount}，因此改注入点后行为与旧版一致。</p>
  */
 @Mixin(DrawContext.class)
 public class DrawContextMixin {
 
     /**
-     * <p>修改 drawItemInSlot 方法中显示堆叠数量的字符串。
-     * <p>当物品数量大于或等于 1000 时，按千、百万、十亿缩写显示，并添加颜色标识。
+     * <p>修改显示堆叠数量时用到的字符串。</p>
+     * <p>当物品数量大于或等于 1000 时，按千、百万、十亿缩写显示，并添加颜色标识。</p>
      *
-     * @param original 原始显示字符串
-     * @param textRenderer 文本渲染器对象
-     * @param stack 物品堆栈对象
-     * @param x x 坐标
-     * @param y y 坐标
+     * @param original      原值（即原版传入的数量覆盖文本，通常为 null）
+     * @param textRenderer  文本渲染器对象
+     * @param stack         物品堆栈对象
+     * @param x             x 坐标
+     * @param y             y 坐标
      * @param countOverride 可选的数量覆盖字符串
      * @return 格式化后的数量字符串
      */
     @ModifyVariable(
-            method = "drawItemInSlot(Lnet/minecraft/client/font/TextRenderer;Lnet/minecraft/item/ItemStack;IILjava/lang/String;)V",
+            method = "drawStackOverlay(Lnet/minecraft/client/font/TextRenderer;Lnet/minecraft/item/ItemStack;IILjava/lang/String;)V",
             at = @At("HEAD"),
             argsOnly = true
     )
