@@ -145,13 +145,18 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 | Mixin | 目标 | 作用 |
 |---|---|---|
 | `ItemStackMixin` | `ItemStack#getMaxCount` | 把可堆叠物品的上限提升为 `global_max` |
-| | `ItemStack.<clinit>` | 重写序列化 Codec，使数量可超过 99 |
+| | `ItemStack#writeNbt` / `ItemStack#fromNbt` | **落盘**的数量由字节改为 int（见第八节） |
 | | `ItemStack#getTooltip` | 追加堆叠数量提示 |
-| `InventoryMixin` | `Inventory#getMaxCountPerStack` / `#getMaxCount(ItemStack)` | 按容器类型区分每格容量；返回值夹到不小于当前数量（见第七节） |
+| `PacketByteBufMixin` | `PacketByteBuf#writeItemStack` / `#readItemStack` | **网络包**里的数量由字节改为 VarInt（见第八节） |
+| `InventoryMixin` | `Inventory#getMaxCountPerStack` | 按容器类型区分每格容量 |
 | `SlotMixin` | `Slot#getMaxItemCount(ItemStack)` | GUI 侧容量，保留槽位自身声明的上限 |
 | `HopperBlockEntityMixin` | 漏斗内 4 处 `getMaxCount()` | 判定对象决定上限来源 |
 | `ItemEntityMixin` | `ItemEntity#merge` | 掉落物合并上限 |
 | `DrawContextMixin`（客户端） | `DrawContext#drawItemInSlot` | 角标数字缩写为 K / M / B |
+
+> 本代（1.20 – 1.20.4）**没有** 1.20.5+ 的那个 `ItemStack.<clinit>` 注入：那一版起原版把数量
+> 收窄成 `rangedInt(1, 99)` 才需要重写 Codec；本代原版 Codec 里数量本来就是不限范围的
+> `Codec.INT`，不需要动。
 
 ### 七、两处安全夹取（防止调低上限时出现负数增量）
 
@@ -169,6 +174,24 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
    （`ItemStack#split(负数)` / `increment(负数)` 会让数量朝**反方向**变化，可被用于复制物品）。
 
 正常情形下（当前数量不超过上限）这三处夹取不产生任何影响。
+
+### 八、数量本身也要装得下：两处 8 位上限
+
+把上限抬到几千之后还有一件容易忽略的事：**原版存放数量的地方只有 8 位**，而且本代这两处
+都不经过 Codec，所以必须逐个处理，漏一个就会出现"数量错乱甚至整格消失"。
+
+| 路径 | 原版写法 | 截断后果 | 本模组的改法 |
+|---|---|---|---|
+| 网络包 | `PacketByteBuf#writeItemStack` 里 `writeByte(count)`；`readItemStack` 里 `readByte()` | 128 ~ 255 读成负数、256 的整数倍读成 0；`ItemStack#isEmpty()` 对 `count <= 0` 为 true，于是**整格物品消失**（打开箱子、拾取、GUI 点击都会触发整包同步） | `PacketByteBufMixin` 改成 `writeVarInt` / `readVarInt` |
+| 存档（区块、玩家数据、掉落物实体） | `ItemStack#writeNbt` 里 `putByte("Count", (byte) count)` | 同上；重进世界后数量错乱 | `ItemStackMixin` 在 `writeNbt` 的 TAIL 补一个 `putInt("Count")` 覆盖，并在 `fromNbt` 的 RETURN 用 `getInt` 还原 |
+
+**为什么读侧要用 `@ModifyVariable` 而不是等方法返回后再修**：原版拿到被截断的字节后会立刻
+`new ItemStack(item, 截断值)`；若截断值恰好是 0，这个栈已经成了空栈、物品信息丢失，
+返回后再改也救不回来。必须在"存进局部变量"那一步就把真实数量换回去。
+
+**兼容性**：VarInt 对 0 ~ 127 就是单个字节，取值与原 `writeByte` 完全一致；NBT 侧同理
+（`putInt(64)` 与 `putByte((byte) 64)` 读出来都是 64）。因此对端没装本模组时，只要数量没超过
+127 就仍能正确解析，不会错位；只有超过 127 才会不一致——而那本来也只有装了本模组才会出现。
 
 ---
 
@@ -341,12 +364,26 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
    而只查常量池与注解的检查完全看不出来。
 3. **`@Redirect` 调用次数核对** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
    这类问题靠符号存在性检查发现不了，必须读字节码。直接取 Mojang 客户端产物，
-   逐方法统计 `ItemStack#getMaxCount()` 的调用次数，确认区间两端（1.20 与 1.20.4）
-   的调用画像完全一致（均为 1 次）。
+   逐方法统计目标方法的调用次数：漏斗那几处 `ItemStack#getMaxCount()` 用
+   `redirect_count_check.py`，网络侧 `PacketByteBuf#writeItemStack` / `#readItemStack` 里的数量读写
+   用 `packet_count_check.py`。后者还会断言**两个写变体里恰好命中一个**——写侧之所以有两个变体，
+   见[第八节](#八数量本身也要装得下两处-8-位上限)与 `PacketByteBufMixin` 的类注释。
 
 > 已知盲区：**构造函数与 `<clinit>`** 不在 intermediary 映射文件里（实测收录 0 条），
 > 无法用上述方式核对，需人工用 `javap` 取目标类签名再与 Yarn 映射对照。
-> 另有一类它**查不出**的问题：同一个 intermediary 类的 **Yarn 包名/类名被改动**。
+> 另有两类它**查不出**的问题：
+>
+> - 同一个 intermediary 类的 **Yarn 包名/类名被改动**（`class_1836` 在 1.20.5 叫
+>   `client.item.TooltipType`、1.21 起叫 `item.tooltip.TooltipType`）；
+> - **中介名不变、描述符变了**。这条最阴：1.20.2 起 `PacketByteBuf#writeNbt` 的中介名仍是
+>   `method_10794`，参数却从 `NbtCompound`（`class_2487`）换成了 `NbtElement`（`class_2520`）；
+>   `PacketByteBuf#writeByte` 的**返回类型**也从 `ByteBuf` 变成了 `PacketByteBuf`
+>   （1.20.2 补了一批"返回自身"的协变重载）。按旧版本编译的调用会直接
+>   `NoSuchMethodError`，而符号核查只看"名字还在不在"。
+>
+> 另外，被重定向的目标若**继承自 Netty**（`writeByte` / `readByte` 这类），它不在
+> intermediary 映射表里（该表只覆盖 Minecraft 自己的类），符号核查会把它归入"无法自动归类的残留项"，
+> 需由 `packet_count_check.py` 补上。
 > 典型就是工具提示的类型参数 `class_1836`：本代（1.20 – 1.20.4）叫
 > `net.minecraft.client.item.TooltipContext`，1.20.5 改名 `TooltipType`，1.21 又被挪到
 > `net.minecraft.item.tooltip` 包。符号核查全程通过（中介名没变），
@@ -445,7 +482,10 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 6. 本模组不提供物品上限数据表——原版上限直接读自物品（`Item#getMaxCount()`），对模组物品同样有效。
 7. **调低 `global_max` 不会销毁已有物品**：已经超过新上限的堆叠会原样保留，
    只是此后无法再把更多物品放进该格（GUI 侧一次最多放入新上限以内的数量）。
-   这与玩家背包的行为一致，详见[第七节](#七三处安全夹取防止调低上限时丢物品)。
+   这与玩家背包的行为一致，详见[第七节](#七两处安全夹取防止调低上限时出现负数增量)。
+8. **数量在网络与存档里都不再受 8 位限制**：本代原版用字节存放数量，超过 127 会截断
+   （打开容器时表现为数量错乱甚至整格消失）。本模组把网络包与 NBT 两条路都改成 VarInt / int，
+   详见[第八节](#八数量本身也要装得下两处-8-位上限)。
 
 ---
 
@@ -529,7 +569,8 @@ src/main/java/com/zhugey/betteritemstack/
 ├── ContainerPolicy.java              容器分类：是否提升、物品层上限、格子层上限
 ├── VanillaMax.java                   读取"原版上限"（读 Item#getMaxCount()，不受本模组改写影响）
 └── mixin/
-    ├── ItemStackMixin.java           物品上限、序列化 Codec、堆叠数量提示
+    ├── ItemStackMixin.java           物品上限、落盘数量、堆叠数量提示
+    ├── PacketByteBufMixin.java       网络包里的数量改用 VarInt
     ├── InventoryMixin.java           容器每格上限按类型区分
     ├── SlotMixin.java                GUI 槽位容量（保留槽位自身声明的上限）
     ├── HopperBlockEntityMixin.java   漏斗容量判定接回容器感知逻辑

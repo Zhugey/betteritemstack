@@ -10,6 +10,51 @@
 
 ---
 
+## 1.3.1 — 2026-10-08
+
+**修复 1.20 – 1.20.4 上的严重缺陷：数量超过 127 的物品在同步与存档时会被破坏。**
+
+### 现象
+
+创造模式取出的整摞物品（`global_max`，默认 9999），只要一打开箱子，那一格的数量就会变化；
+256 的整数倍会直接变成 0，整格物品消失。
+
+### 原因
+
+本代原版把**数量存成 8 位字节**，而这两条路径都不经过 Codec：
+
+| 路径 | 原版写法 | 后果 |
+|---|---|---|
+| 网络包 | `PacketByteBuf#writeItemStack` 里 `writeByte(count)` 写、`readItemStack` 里 `readByte()` 读 | 128 ~ 255 读成负数、256 的整数倍读成 0；`ItemStack#isEmpty()` 对 `count <= 0` 返回 true → **整格消失**。打开容器、拾取、GUI 点击都会做整包同步 |
+| 存档 | `ItemStack#writeNbt` 里 `putByte("Count", (byte) count)` | 同上；重进世界后数量错乱 |
+
+1.3.0 漏掉这两条，是因为常规符号核查只问"名字还在不在"，而这两个名字一直都在。
+
+### 修复
+
+- 新增 `PacketByteBufMixin`：网络包里的数量改用 `writeVarInt` / `readVarInt`；
+- `ItemStackMixin` 增加落盘数量的处理：`writeNbt` 的 TAIL 补一个 `putInt("Count")` 覆盖原字节，
+  `fromNbt` 的 RETURN 用 `getInt` 还原。
+
+### 兼容性
+
+VarInt 对 0 ~ 127 就是单个字节，NBT 侧 `putInt` 与 `putByte` 读出来也一样，因此对端未装本模组时
+数量 ≤ 127 仍能正确解析、不会错位；只有 > 127 才会不一致——而那本来也只有装了本模组才会出现。
+
+### 一并处理的细节
+
+- 写侧为什么是**两个** `require = 0` 的变体：1.20.2 给 `PacketByteBuf` 补了一批"返回自身"的协变重载，
+  写数量调用的返回类型由 `ByteBuf` 变成 `PacketByteBuf`，而 `@Redirect` 处理器的返回类型必须与目标一致，
+  一个 handler 覆盖不了两种形态。每个版本恰好命中一个。
+- 读侧用 `@ModifyVariable` 而非"方法返回后再修"：原版拿到截断值后会立刻 `new ItemStack(item, 截断值)`，
+  截断值恰为 0 时物品信息已丢失，返回后再改救不回来。
+- 新增离线校验脚本 `packet_count_check.py`，逐个版本断言"恰好命中一个写变体、调用次数为 1"，
+  把 `require = 0` 带来的静默风险变成可验证项。
+- README 更正：本分支**没有** `ItemStack.<clinit>` 的 Codec 重写注入——那是 1.20.5 起原版把数量
+  收窄成 `rangedInt(1, 99)` 才需要的，本代 Codec 里的数量本来就不限范围。
+
+---
+
 ## 1.3.0 — 2026-10-08
 
 **1.20 分支的首个版本**，只支持 **Minecraft 1.20 – 1.20.4**。

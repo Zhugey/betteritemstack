@@ -4,6 +4,7 @@ import com.zhugey.betteritemstack.Config;
 import net.minecraft.client.item.TooltipContext;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.registry.Registries;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -23,6 +24,16 @@ import java.util.List;
  *       {@code Codec.INT}（字段名 {@code Count}，<b>不限范围</b>）；
  *       1.20.5 起才改成 {@code rangedInt(1, 99)}，那才需要用 {@code <clinit>} 注入改写。
  *       因此这里没有 {@code @Shadow CODEC}、也没有 {@code bis$allowLargeCounts}。</li>
+ *   <li><b>但数量在「落盘」与「网络」两条路上都会被截断</b>，必须另外处理：
+ *       <ul>
+ *         <li>落盘 —— 原版 {@code writeNbt} 写成 {@code putByte("Count", (byte)count)}，
+ *             本类在 TAIL 处补一个 {@code putInt} 覆盖它，读回时在 {@code fromNbt} 的 RETURN
+ *             处用 {@code getInt} 还原（{@code NbtCompound.contains(key, NUMBER_TYPE)}
+ *             对 ByteTag 也返回 true，所以旧存档照常读得出来）；</li>
+ *         <li>网络 —— 原版 {@code PacketByteBuf#writeItemStack} 用 {@code writeByte} 传输数量，
+ *             由 {@code PacketByteBufMixin} 改为 VarInt。</li>
+ *       </ul>
+ *       这两处若漏掉任何一条，表现都是"数量超过 127 的物品在同步/存档后数量错乱甚至整格消失"。</li>
  *   <li><b>没有物品组件。</b>"可损坏物品"必须用 {@code getItem().isDamageable()}（纯物品级），
  *       不能用 {@link ItemStack#isDamageable()} —— 后者在本代的实现是
  *       {@code !isEmpty() && getItem().getMaxDamage() > 0 && !nbt.getBoolean("Unbreakable")}，
@@ -38,6 +49,9 @@ public abstract class ItemStackMixin {
 
     /** 堆叠数量达到该值时才在工具提示中显示数量。 */
     private static final int BIS_TOOLTIP_THRESHOLD = 1000;
+
+    /** 原版序列化物品时数量所用的 NBT 键名。 */
+    private static final String COUNT_KEY = "Count";
 
     /**
      * <p>重写 {@link ItemStack#getMaxCount()} 方法，返回全局最大堆叠数量。</p>
@@ -72,6 +86,56 @@ public abstract class ItemStackMixin {
         }
 
         cir.setReturnValue(Config.GLOBAL_MAX);
+    }
+
+    /**
+     * <p>把写进 NBT 的数量由字节改为 int，供存档（区块、玩家数据）与物品实体使用。</p>
+     *
+     * <p>原版 {@code writeNbt} 的实现是 {@code nbt.putByte("Count", (byte) this.count)}，
+     * 超过 127 的数量会被截断。这里在方法 TAIL 处补一个 {@code putInt} <b>覆盖</b>掉刚写下的
+     * ByteTag，因此键名不变、也不多出任何字段。</p>
+     *
+     * <p>对 <b>≤ 127</b> 的数量，写出的值与原版逐位相同（只是 NBT 类型由 ByteTag 变成 IntTag），
+     * 而 {@code NbtCompound#getByte} 对 IntTag 会走 {@code byteValue()}，读到的数字仍然正确——
+     * 也就是说即使有人卸掉本 Mod 去读这份存档，小数量也不会损坏。</p>
+     *
+     * @param nbt 正在构造的 NBT（原方法的形参）
+     * @param cir 回调对象（本注入不回写返回值，仅修改形参对象）
+     */
+    @Inject(method = "writeNbt", at = @At("TAIL"))
+    private void bis$writeCountAsInt(NbtCompound nbt, CallbackInfoReturnable<NbtCompound> cir) {
+        ItemStack self = (ItemStack) (Object) this;
+        nbt.putInt(COUNT_KEY, self.getCount());
+    }
+
+    /**
+     * <p>读回 {@link #bis$writeCountAsInt} 写下的 int 数量。</p>
+     *
+     * <p>原版 {@code fromNbt} 内部 {@code new ItemStack(NbtCompound)} 时读的是
+     * {@code getByte("Count")}，IntTag 走 {@code byteValue()} 会被截断，所以这里在 RETURN 处
+     * 用 {@code getInt} 重新取一次并还原。</p>
+     *
+     * <p>该 API 对旧存档同样成立：{@code NbtCompound#contains(String, NUMBER_TYPE)} 对
+     * ByteTag / ShortTag / IntTag 等一律返回 true，{@code getInt} 则统一走
+     * {@code AbstractNbtNumber#intValue()}，所以 <b>旧数据读出来的值与构造函数读到的一致</b>，
+     * 本注入对旧存档是个恒等操作（用 {@code count != stack.getCount()} 判断，不做多余写入）。</p>
+     *
+     * @param nbt 源 NBT
+     * @param cir 回调对象，取出已构建好的堆叠并就地修正数量
+     */
+    @Inject(method = "fromNbt", at = @At("RETURN"))
+    private static void bis$readCountAsInt(NbtCompound nbt, CallbackInfoReturnable<ItemStack> cir) {
+        ItemStack stack = cir.getReturnValue();
+        // fromNbt 的早返回分支给出的是 EMPTY（解析失败时），此时无数量可言。
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+
+        // 键缺失或非数值时 getInt 返回 0，用 > 0 一并挡掉。
+        int count = nbt.getInt(COUNT_KEY);
+        if (count > 0 && count != stack.getCount()) {
+            stack.setCount(count);
+        }
     }
 
     /**
