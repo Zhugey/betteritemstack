@@ -5,11 +5,16 @@
 #
 # 推送任意 tag（v1.0.1 / 1.0.1 / V1.0.1 均可）时，会额外从 CHANGELOG.md 抽取该版本的小节，
 # 自动创建 GitHub Release 并把 build/libs/*.jar 作为附件上传。
+# Release 标题会带上本分支的 MC 支持区间，形如 "v1.0.2 (Minecraft 1.21.1–1.21.4)"。
 # 详见文件末尾的两个步骤。
 #
 # 注意：不要在这里把条件收紧成只认 "v" 前缀。曾经因为写成 refs/tags/v*，
 # 而实际 tag 名为 1.0.1，导致推送 tag 后 Release 完全没有被创建、也没有任何报错。
 # 版本号统一用下面 extract 步骤里的 ${TAG#[vV]} 归一化即可。
+#
+# tag 约定：只用版本号，不要把 MC 区间写进 tag（区间由产物名与 Release 标题承担）。
+# 若把区间写进 tag，归一化后的名字匹配不到 CHANGELOG 的 "## <版本号>" 小节，
+# 会静默回退成把整份 CHANGELOG 当作 Release 正文。
 
 name: build
 on: [pull_request, push]
@@ -52,7 +57,10 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          # 归一化：先剥掉可选的 v/V 前缀，再丢掉 semver 的 +build-metadata 后缀
+          # （后者让 v1.0.3+mc1.21.1-1.21.4 这类写法也能正确匹配 CHANGELOG 小节）
           VERSION="${TAG#[vV]}"
+          VERSION="${VERSION%%+*}"
           echo "标签：$TAG    版本：$VERSION"
 
           # 抽取 "## <版本号>" 开头、到下一个标题或 --- 分隔线之前的内容
@@ -81,14 +89,21 @@ jobs:
           set -euo pipefail
           ls -l "$JAR_DIR"
 
+          # 标题带上本分支的 MC 支持区间（与 gradle.properties 同源），
+          # 这样从 tag 列表里也能一眼看出该版本覆盖哪些 MC 版本。
+          MC_MIN=$(sed -n 's/^minecraft_version_min=//p' gradle.properties | tr -d '[:space:]')
+          MC_MAX=$(sed -n 's/^minecraft_version_max=//p' gradle.properties | tr -d '[:space:]')
+          TITLE="$TAG (Minecraft $MC_MIN–$MC_MAX)"
+          echo "Release 标题：$TITLE"
+
           # 幂等：同一个 tag 重跑工作流时更新已有 Release，而不是报"已存在"
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG 已存在，改为更新。"
-            gh release edit "$TAG" --title "$TAG" --notes-file release-notes.md
+            gh release edit "$TAG" --title "$TITLE" --notes-file release-notes.md
             gh release upload "$TAG" "$JAR_DIR"/*.jar --clobber
           else
             gh release create "$TAG" \
-              --title "$TAG" \
+              --title "$TITLE" \
               --notes-file release-notes.md \
               --verify-tag \
               "$JAR_DIR"/*.jar

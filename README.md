@@ -469,7 +469,14 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 工作流会构建、从 `CHANGELOG.md` 抽取 `## 1.0.2` 一节作为 Release 正文，
 并把 `build/libs/*.jar` 作为附件上传。同一个 tag 重跑时会**更新**已有 Release，不会报错。
 
-tag 名带不带 `v` 前缀都可以（`v1.0.2` 与 `1.0.2` 等价，抽取时会自动剥掉前缀）。
+tag 名带不带 `v` 前缀都可以（`v1.0.2` 与 `1.0.2` 等价，抽取时会自动剥掉前缀）；
+`+` 之后的内容会被忽略，所以将来若要写 `v1.0.3+mc1.21.1-1.21.4` 这类 semver 元数据也能正确抽取。
+
+> **tag 只用版本号，不要把 MC 区间写进去。** 区间已经出现在三个更合适的位置：产物文件名、
+> Release 标题（CI 会自动拼成 `v1.0.2 (Minecraft 1.21.1–1.21.4)`），以及上文的兼容性表。
+> 把区间塞进 tag（例如 `V1.0.1_1.21.1-1.21.4`）会有实际代价：CI 是拿 tag 名去 `CHANGELOG.md`
+> 里找 `## <版本号>` 小节，归一化后的名字匹配不上，就会**静默回退**成把整份更新日志当成 Release 正文。
+> 主流模组（AppleSkin、JEI、REI、Botania、Mod Menu 等）同样只用纯版本号作 tag。
 
 在 IntelliJ IDEA 里用界面完成同样的事（无需命令行）：
 
@@ -526,9 +533,9 @@ src/main/resources/assets/betteritemstack/lang/
 
 ## 许可与致谢
 
-- **License**：CC0-1.0
+- **License**：MIT
 - 基于 [develk-coder/ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发，
-  原作者 develk
+  原作者 develk。上游项目同样采用 MIT 授权，本项目一并保留其版权与许可声明。
 
 ### 相关模组
 
