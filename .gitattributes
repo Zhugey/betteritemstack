@@ -10,3 +10,8 @@
 # 语言文件由脚本生成，固定 lf，避免 checkout 时被转成 crlf 而产生虚假改动
 *.json          text eol=lf
 
+# 许可证文本会被打进 jar（见 build.gradle 里 from("LICENSE") 那一段）。
+# 不固定行尾的话：Windows（core.autocrlf=true）检出成 crlf、Linux CI 检出成 lf，
+# 于是同一版本在两边打出的 jar 有一个条目对不上，"Release 附件 == 本地构建"的比对会误报。
+LICENSE         text eol=lf
+
