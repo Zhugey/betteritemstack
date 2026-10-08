@@ -25,7 +25,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *   <caption>判定点与上限来源</caption>
  *   <tr><th>方法</th><th>判定对象</th><th>上限来源</th></tr>
  *   <tr><td>{@code isFull()}</td><td>漏斗自身</td><td>{@code itemCapFor(this)}：漏斗默认不提升 → 原版 64 / 16 / 1</td></tr>
- *   <tr><td>{@code isInventoryFull(Inventory, Direction)}</td><td>目标容器</td><td>{@code itemCapFor(目标)}：箱子等提升容器 → {@code global_max}</td></tr>
+ *   <tr><td>{@code method_17769(Inventory, int)}</td><td>目标容器</td><td>{@code itemCapFor(目标)}：箱子等提升容器 → {@code global_max}</td></tr>
  *   <tr><td>{@code transfer(…, int, Direction)}</td><td>目标容器</td><td>{@code itemCapFor(目标)}，并夹下界保证增量非负</td></tr>
  *   <tr><td>{@code canMergeItems(ItemStack, ItemStack)}</td><td>—</td><td>只判"是否同种物品"；计数上限交由 {@code transfer} 负责</td></tr>
  * </table>
@@ -41,11 +41,23 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  *
  * <p>4 参数的重载 {@code transfer(Inventory, Inventory, ItemStack, Direction)} 只负责遍历格子，
  * 自身不直接读取上限，故不在重定向范围内。
+ *
+ * <p><b>本分支（1.20 – 1.20.4）与 1.20.5+ 的差异</b>：1.20.5 起，"目标容器是否已满"的判定被
+ * 写在 {@code isInventoryFull(Inventory, Direction)} 方法<b>本体</b>里；而本代它是
+ * {@code getAvailableSlots(...).allMatch(...)}，那段判定被编译进了合成 lambda
+ * {@code method_17769(Inventory, int)}（{@code stack.getCount() >= stack.getMaxCount()}）。
+ * <b>因此 {@code @Redirect} 必须指向那个 lambda，而不能写 {@code isInventoryFull}</b> ——
+ * 写在后者会因"目标方法内找不到该调用"而注入失败。其余三处（{@code isFull}、{@code transfer}、
+ * {@code canMergeItems}）的结构与 1.20.5+ 一致。
  */
 @Mixin(HopperBlockEntity.class)
 public abstract class HopperBlockEntityMixin {
 
     private static final String GET_MAX_COUNT = "Lnet/minecraft/item/ItemStack;getMaxCount()I";
+
+    /** 1.20 – 1.20.4：{@code isInventoryFull} 的判定 lambda（Yarn 未给可读名，故仍是中介名）。 */
+    private static final String INVENTORY_FULL_LAMBDA =
+            "method_17769(Lnet/minecraft/inventory/Inventory;I)Z";
 
     private static final String TRANSFER_WITH_SLOT =
             "transfer(Lnet/minecraft/inventory/Inventory;Lnet/minecraft/inventory/Inventory;"
@@ -53,18 +65,19 @@ public abstract class HopperBlockEntityMixin {
                     + "Lnet/minecraft/item/ItemStack;";
 
     /**
-     * {@code isInventoryFull(Inventory, Direction)} 中的上限：由目标容器决定。
+     * 目标容器"是否已满"判定中的上限：由目标容器决定。
      *
-     * <p>该方法是 {@code insert()} 的提前返回优化——若沿用原版值，箱子每格一到 64 就会被
-     * 判定为"已满"，从而停止推送。
+     * <p>注入点是 {@code method_17769(Inventory inventory, int slot)}，其实现为
+     * {@code ItemStack s = inventory.getStack(slot); return s.getCount() >= s.getMaxCount();}。
+     * 若沿用原版值，箱子每格一到 64 就会被判定为"已满"，从而停止推送。
      *
-     * @param stack     原调用接收者（目标容器某格中的堆叠）
-     * @param inventory 目标容器（追加的目标方法参数）
-     * @param direction 抽取方向（追加的目标方法参数）
+     * @param stack     原调用接收者（目标容器该格中的堆叠）
+     * @param inventory 目标容器（目标方法的第 1 个参数）
+     * @param slot      目标格索引（目标方法的第 2 个参数）
      * @return 该物品在目标容器中的上限
      */
-    @Redirect(method = "isInventoryFull", at = @At(value = "INVOKE", target = GET_MAX_COUNT))
-    private static int bis$inventoryFullCap(ItemStack stack, Inventory inventory, Direction direction) {
+    @Redirect(method = INVENTORY_FULL_LAMBDA, at = @At(value = "INVOKE", target = GET_MAX_COUNT))
+    private static int bis$inventoryFullCap(ItemStack stack, Inventory inventory, int slot) {
         return ContainerPolicy.itemCapFor(inventory, stack);
     }
 
@@ -95,7 +108,7 @@ public abstract class HopperBlockEntityMixin {
 
     /**
      * {@code canMergeItems(ItemStack first, ItemStack second)}：原版实现为
-     * {@code first.getCount() <= first.getMaxCount() && areItemsAndComponentsEqual(first, second)}。
+     * {@code first.getCount() < first.getMaxCount() && ItemStack.canCombine(first, second)}。
      *
      * <p>前半段的计数检查在这里既无意义也有害：{@code first} 是目标格里的堆叠，而"能装多少"
      * 必须由目标容器决定，这个方法拿不到目标容器。若沿用原版值，一个已经堆到 5000 的提升容器
@@ -104,7 +117,10 @@ public abstract class HopperBlockEntityMixin {
      *
      * <p>因此这里只保留真正有意义的"是否同种物品"判定。<b>计数上限并没有被放松</b>：
      * 权威闸门是 {@code transfer} 里的 {@code bis$transferCap}（已夹下界保证安全），
-     * 以及 {@code to.setStack} 路径上的 {@code capCount}。
+     * 以及 {@code to.setStack} 路径上的容量收窄。
+     *
+     * <p>{@code ItemStack#canCombine} 在本代（1.20 – 1.20.4）的定义是
+     * {@code areItemsEqual && areNbtEqual}，即"物品 + NBT 相同"，没有 1.20.5+ 才有的物品组件概念。
      *
      * @param first  目标格中的堆叠
      * @param second 来料堆叠
@@ -112,7 +128,7 @@ public abstract class HopperBlockEntityMixin {
      */
     @Inject(method = "canMergeItems", at = @At("HEAD"), cancellable = true)
     private static void bis$canMerge(ItemStack first, ItemStack second, CallbackInfoReturnable<Boolean> cir) {
-        cir.setReturnValue(ItemStack.areItemsAndComponentsEqual(first, second));
+        cir.setReturnValue(ItemStack.canCombine(first, second));
     }
 
     /**

@@ -4,7 +4,6 @@ import net.minecraft.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.block.entity.BarrelBlockEntity;
 import net.minecraft.block.entity.BrewingStandBlockEntity;
 import net.minecraft.block.entity.ChestBlockEntity;
-import net.minecraft.block.entity.CrafterBlockEntity;
 import net.minecraft.block.entity.DispenserBlockEntity;
 import net.minecraft.block.entity.DropperBlockEntity;
 import net.minecraft.block.entity.HopperBlockEntity;
@@ -67,8 +66,7 @@ public final class ContainerPolicy {
             "dropper",
             "dispenser",
             "furnace",
-            "brewing_stand",
-            "crafter"
+            "brewing_stand"
     );
 
     private ContainerPolicy() {
@@ -131,9 +129,8 @@ public final class ContainerPolicy {
         if (inventory instanceof BrewingStandBlockEntity) {
             return "brewing_stand";
         }
-        if (inventory instanceof CrafterBlockEntity) {
-            return "crafter";
-        }
+        // 注：1.21 起还有 CrafterBlockEntity（合成器），本分支的支持区间（1.20 – 1.20.4）
+        // 没有这个方块，故不列出，否则会引到一个不存在的类。
         return null;
     }
 

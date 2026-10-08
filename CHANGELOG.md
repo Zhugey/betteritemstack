@@ -10,6 +10,52 @@
 
 ---
 
+## 1.3.0 — 2026-10-08
+
+**1.20 分支的首个版本**，只支持 **Minecraft 1.20 – 1.20.4**。
+这一代与 1.20.5+ 属于两套 API，必须单独一条分支：本代还没有"栈上限重构"
+（没有 `Inventory#getMaxCount(ItemStack)`，也没有物品组件），而且运行环境是 **Java 17**
+（1.20.5 起才升到 Java 21）。
+
+### 与 1.20.5+ 分支的代码差异
+
+| 位置 | 1.20 – 1.20.4（本分支） | 1.20.5+ |
+|---|---|---|
+| `VanillaMax` | 读 `Item#getMaxCount()`（物品级） | 读 `minecraft:max_stack_size` 组件 |
+| `ItemStackMixin` 的 CODEC 重写 | **不需要**：本代 `ItemStack.CODEC` 的 count 就是 `Codec.INT`（字段名 `Count`，不限范围） | 需要：1.20.5 起改成 `rangedInt(1, 99)` |
+| 可损坏物品判定 | `getItem().isDamageable()`（纯物品级） | `stack.contains(MAX_DAMAGE)` |
+| `getTooltip` 注入签名 | `(PlayerEntity, TooltipContext)` | 多一个 `Item.TooltipContext` 形参 |
+| `InventoryMixin` | 只拦截 `getMaxCountPerStack()` | 还要拦截 `getMaxCount(ItemStack)` |
+| 漏斗的目标容器判定 | 在合成 lambda `method_17769(Inventory,int)` 里 | 在 `isInventoryFull` 方法本体里 |
+| `ContainerPolicy` | 无 `CrafterBlockEntity`（1.21 才有） | 有 |
+| 编译目标 / 运行环境 | Java 17 | Java 21 |
+
+### 两个值得记下的坑
+
+- **`isInventoryFull` 那处 `@Redirect` 在 1.20 上不能照搬**：本代"目标容器是否已满"的判定
+  被编译进了合成 lambda `method_17769(Inventory, int)`（即
+  `stack.getCount() >= stack.getMaxCount()`），写在 `isInventoryFull` 上会因
+  "目标方法内找不到该调用"而**注入失败**。已改为指向那个 lambda。
+- **核查工具的一处误报已修**：`redirect_count_check.py` 原先只按方法名匹配 `getMaxCount`，
+  把同名的 `ItemStack#increment(int)`（混淆名同为 `g`、描述符为 `(I)V`）也算了进去，
+  于是 1.20 的 `transfer` 被误报为"调用了 2 次"。现在会连描述符一起比对。
+
+### 兼容性
+
+- ✅ **1.20 / 1.20.1 / 1.20.2 / 1.20.3 / 1.20.4** —— 共 5 个正式版，同一个 jar 直接可用。
+- ❌ **1.20.5 及以上**：属于新一代 API，见 **1.20.5 分支** / **1.21.5 分支** / **1.21.11 分支**。
+- 需要 Fabric Loader **≥ 0.14.21**、Fabric API、**Java 17**。
+
+### 验证
+
+- **符号核查**：1.20 – 1.20.4 连续 5 个版本与基线符号画像完全一致；1.20.5+ 报出具体缺失项。
+- **注入目标核查**：14 个注入目标（含那个 lambda）在 1.20 – 1.20.4 全部可解析。
+- **`@Redirect` 调用次数**：区间两端（1.20 与 1.20.4）三处目标方法内
+  `ItemStack#getMaxCount()` 的调用次数均为 1 次。
+- 构建 **0 诊断**。
+
+---
+
 ## 1.0.3 — 2026-10-08
 
 **支持区间由 1.21.1 – 1.21.4 扩到 1.20.5 – 1.21.4**，编译目标改为区间下限 **1.20.5**。

@@ -4,13 +4,13 @@
 > 箱子、木桶、潜影盒、玩家背包可以堆到极大值；**漏斗与漏斗矿车保持原版上限**，
 > 红石计时器与计数器因此不受影响。
 
-- 支持 Minecraft **1.20.5 – 1.21.4**（同一个 jar 直接可用，无需按版本分开构建）
-- 编译目标 1.20.5 / Fabric / Java 21
+- 支持 Minecraft **1.20 – 1.20.4**（同一个 jar 直接可用，无需按版本分开构建）
+- 编译目标 1.20 / Fabric / Java 17
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
 - 仓库：<https://github.com/Zhugey/betteritemstack>
 
-> 本分支对应 Minecraft **1.20.5 – 1.21.4**。若你使用 **1.21.5 – 1.21.10**，请改用 **1.21.5 分支**的产物；
-> 使用 **1.21.11** 则改用 **1.21.11 分支**的产物——
+> 本分支对应 Minecraft **1.20 – 1.20.4**。若你使用 **1.20.5 – 1.21.4**，请改用 **1.20.5 分支**的产物；
+> 使用 **1.21.5 – 1.21.10** 或 **1.21.11**，请改用 **1.21.5 分支** / **1.21.11 分支**的产物——
 > 各分支针对自己的编译目标产出 intermediary 命名空间的 jar，不能互换。
 
 ---
@@ -99,14 +99,14 @@ min(容器自身的 getMaxCountPerStack() / 槽位自身的 getMaxItemCount(),  
 改写 `getMaxCount()` 之后，"这件物品原本能堆多少"在游戏内就不可考了——这也是很多同类模组
 不得不维护一张上千条 JSON 表的原因。
 
-本模组换了一条路：`ItemStack#getMaxCount()` 的实现本质上就是读取组件
-`minecraft:max_stack_size`，所以直接读组件即可拿到物品自己的真实上限：
+本模组换了一条路：本代（1.20 – 1.20.4）还没有物品组件，原版上限就声明在
+`Item.Settings#maxCount()` 里、由 `Item#getMaxCount()` 暴露，所以直接读**物品级**上限即可：
 
 ```java
-Integer limit = stack.get(DataComponentTypes.MAX_STACK_SIZE);
+int limit = stack.getItem().getMaxCount();
 ```
 
-不依赖方法调用，因此不会被本模组自己的改写影响；而且**对模组新增物品同样有效**，
+绕开了 `ItemStack` 上被改写的方法，因此不会受影响；而且**对模组新增物品同样有效**，
 无需任何维护。
 
 ### 四、为什么必须保留"槽位自身声明的上限"
@@ -153,26 +153,19 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 | `ItemEntityMixin` | `ItemEntity#merge` | 掉落物合并上限 |
 | `DrawContextMixin`（客户端） | `DrawContext#drawItemInSlot` | 角标数字缩写为 K / M / B |
 
-### 七、三处安全夹取（防止调低上限时丢物品）
+### 七、两处安全夹取（防止调低上限时出现负数增量）
 
 `global_max` 可以在游戏内用 `/bis set` 调低。此时若某个格子里的数量已经超过新上限，
-原版有几处会据此截断、或计算出负数：
+原版有几处会据此算出**负数增量**：
 
-1. **`Inventory#getMaxCount(ItemStack)` 的返回值夹到不小于该堆叠当前数量**
-   （`ContainerPolicy#capacityFor`）。这是最关键的一处。
+> **本代与 1.20.5+ 的差异**：1.20.5 起原版有 6 处 `stack.capCount(this.getMaxCount(stack))`，
+> 会把超量堆叠**静默截断**（一次丢掉几千个），那边必须靠 `ContainerPolicy#capacityFor`
+> 把返回值夹到不小于当前数量来抵消。**本代还没有 `ItemStack#capCount`**，那条路径不存在，
+> 所以这里只剩"负数增量"这一类风险。
 
-   原版有 6 处把它直接当作 `stack.capCount(this.getMaxCount(stack))` 的参数，
-   而 `ItemStack#capCount` 的实现是 `setCount(maxCount)`——**直接覆盖数量，超出的部分被销毁且不返还**。
-   若不夹取，把上限从 9999 调到 1000 之后，箱子（以及木桶、潜影盒、熔炉、发射器等
-   所有 `LockableContainerBlockEntity` 子类）里任何一次 `setStack` 都会把已有的 9999 截成 1000，
-   **一次丢掉 8999 个**。
-
-   玩家背包不会出现该现象，因为 `PlayerInventory#setStack` **根本不调用 `capCount`**
-   （只做 `defaultedList.set(slot, stack)`）。夹取之后两者行为一致：
-   **已有堆叠不会被回溯截断，容量只在"插入时"生效。**
-
-2. `SlotMixin#getMaxItemCount(ItemStack)`：保证 GUI 侧一次最多放入上限以内的数量；
-3. `HopperBlockEntityMixin#transfer`：保证漏斗传输的增量恒为非负
+1. `SlotMixin#getMaxItemCount(ItemStack)`：保证 GUI 侧一次最多放入上限以内的数量，
+   返回值同时夹到不小于槽内当前数量（`Slot#insertStack` 会据此算 `上限 - 当前数量`）；
+2. `HopperBlockEntityMixin#transfer`：保证漏斗传输的增量恒为非负
    （`ItemStack#split(负数)` / `increment(负数)` 会让数量朝**反方向**变化，可被用于复制物品）。
 
 正常情形下（当前数量不超过上限）这三处夹取不产生任何影响。
@@ -181,9 +174,9 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 
 ## 安装
 
-1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)（≥ 0.15.11）
+1. 安装 [Fabric Loader](https://fabricmc.net/use/installer/)（≥ 0.14.21）
 2. 把 [Fabric API](https://modrinth.com/mod/fabric-api) 与本模组的 jar 一起放进 `mods/`
-3. 需要 **Java 21**，Minecraft 需为 **1.20.5 – 1.21.4** 之一
+3. 需要 **Java 17**，Minecraft 需为 **1.20 – 1.20.4** 之一
 
 ---
 
@@ -327,15 +320,15 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 | Minecraft | 结论 | 原因 |
 |---|---|---|
-| **1.20.5 – 1.21.4** | ✅ **同一个 jar 直接可用** | 全部符号与字节码调用画像一致 |
-| 1.21.5 – 1.21.10 | ❌ **本分支不适用** | 1.21.5 起组件读取方法换了接口体系，`VanillaMax` 读取 `minecraft:max_stack_size` 的写法失效。请改用 **1.21.5 分支**的产物 |
-| 1.21.11 | ❌ **本分支不适用** | 除上一条外，权限体系也换代：`CommandSource#hasPermissionLevel(int)` 被新的 `PermissionPredicate` 体系取代。请改用 **1.21.11 分支**的产物 |
-| 1.20 – 1.20.4 | ❌ **本分支不适用** | 这一代还没有"栈上限重构"（缺 `Inventory#getMaxCount(ItemStack)`，组件类也尚不存在），且运行环境是 **Java 17**，需要另行单独适配 |
+| **1.20 – 1.20.4** | ✅ **本分支的 jar** | 全部符号与字节码调用画像一致 |
+| 1.20.5 – 1.21.4 | ❌ **本分支不适用** | 本代还没有"栈上限重构"（缺 `Inventory#getMaxCount(ItemStack)`，物品组件也不存在），本构建在新一代上会因符号缺失而无法启动。请改用 **1.20.5 分支**的产物 |
+| 1.21.5 – 1.21.10 | ❌ **本分支不适用** | 请改用 **1.21.5 分支**的产物 |
+| 1.21.11 | ❌ **本分支不适用** | 请改用 **1.21.11 分支**的产物 |
 
 上述结论都能用**静态检查**复现，不需要实机逐个版本运行。三项检查分别是：
 
 1. **注入目标与符号引用核对** —— 从构建产物中提取 **Mixin 的注入目标**与 **class 常量池里的全部
-   intermediary 引用**，逐个到 1.20.5 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
+   intermediary 引用**，逐个到 1.20 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
    注入目标的存放形式随 Loom 版本而变，两种都要覆盖：旧 Loom 放在 `refmap.json` 里，
    新 Loom（≥1.12）不再生成 refmap、而是把目标**就地重映射进注解**
    （`@At(target="Lnet/minecraft/class_1799;method_7914()I")`），此时须用 `javap -v` 从注解里读取。
@@ -344,25 +337,34 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 2. **`@Shadow` 成员核对** —— Mixin 的 `@Shadow` 成员在构建时会被改名成目标类的 intermediary 名
    （`field_xxxxx` / `method_xxxxx`），必须逐个确认该名称在目标版本里仍然存在。
    这一类引用**不在常量池里**（声明属于 mixin 自身，而不是对目标类的引用），因此要单独扫出来。
-   **这一项极易遗漏**：本模组的 `ItemStack#ITEM_CODEC` 就是例子——该字段在 1.21.2 起被移除，
+   **这一项极易遗漏**：1.21.1 分支的 `ItemStack#ITEM_CODEC` 就是例子——该字段在 1.21.2 起被移除，
    而只查常量池与注解的检查完全看不出来。
 3. **`@Redirect` 调用次数核对** —— `@Redirect` 要求目标方法内**恰好调用一次**被重定向的方法，
    这类问题靠符号存在性检查发现不了，必须读字节码。直接取 Mojang 客户端产物，
-   逐方法统计 `ItemStack#getMaxCount()` 的调用次数，确认区间两端（1.20.5 与 1.21.4）
+   逐方法统计 `ItemStack#getMaxCount()` 的调用次数，确认区间两端（1.20 与 1.20.4）
    的调用画像完全一致（均为 1 次）。
 
 > 已知盲区：**构造函数与 `<clinit>`** 不在 intermediary 映射文件里（实测收录 0 条），
 > 无法用上述方式核对，需人工用 `javap` 取目标类签名再与 Yarn 映射对照。
 > 另有一类它**查不出**的问题：同一个 intermediary 类的 **Yarn 包名/类名被改动**。
-> 本分支就踩过一次 —— `class_1836`（工具提示的类型参数）在 1.20.5 叫
-> `net.minecraft.client.item.TooltipType`，1.21 起才改成 `net.minecraft.item.tooltip.TooltipType`；
-> 符号核查全过，但按 1.21 的包名写会因为"程序包不存在"而编译失败。
+> 典型就是工具提示的类型参数 `class_1836`：本代（1.20 – 1.20.4）叫
+> `net.minecraft.client.item.TooltipContext`，1.20.5 改名 `TooltipType`，1.21 又被挪到
+> `net.minecraft.item.tooltip` 包。符号核查全程通过（中介名没变），
+> 但源码按另一代的包名写就会因"程序包不存在"而编译失败。
 > **结论：符号核查负责"能不能运行"，"能不能编译"仍以编译器为准。**
 
-> **1.21.5 – 1.21.10 与 1.21.11 都已经单独出了分支**（见 **1.21.5 分支** 与 **1.21.11 分支**）：
-> 前者要把 `VanillaMax` 的组件读取改为新 API，后者还要一并改写权限判定。
-> **1.20 – 1.20.4 则属于更早的一代**（Java 17、没有栈上限重构），同样需要单独一条分支。
-> 这些都属于跨版本适配，不在 1.0.x 的范围。
+> 另一类只靠符号核查也发现不了的问题：**符号还在、但位置变了**。
+> 本分支就踩到一次 —— 1.20.5 起"目标容器是否已满"的判定写在
+> `isInventoryFull(Inventory, Direction)` 本体里，而本代它被编译进了合成 lambda
+> `method_17769(Inventory, int)`。`@Redirect(method = "isInventoryFull")` 在 1.20 上会因
+> "目标方法内找不到该调用"而注入失败，**必须改指向那个 lambda**。
+> 好在 `mc_compat_check.py` 会核对注入目标本身，能提前把这类问题拦下来。
+
+> **五条分支的分工**：本分支 `1.20 – 1.20.4`（Java 17、无物品组件）；
+> **1.20.5 分支** `1.20.5 – 1.21.4`（栈上限重构 + Java 21）；
+> **1.21.5 分支** `1.21.5 – 1.21.10`（组件读取换接口体系）；
+> **1.21.11 分支** 仅 1.21.11（权限体系换代）。
+> 每条分支都针对自己的编译目标产出 intermediary jar，**不能互换**。
 
 ### `gradle.properties` 里的版本号分别管什么
 
@@ -374,15 +376,15 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 |---|---|---|---|
 | `loader_version` | **✅ 会写进 `depends.fabricloader`** | 编译期依赖 **+** 玩家门槛 | 取**能工作的最低版本**，不要用"当前最新"——否则白白挡住老玩家 |
 | `minecraft_version` / `_min` / `_max` | **✅ 会写进 `depends.minecraft`** | 编译目标 / 声明区间 | 见上一节，按符号验证结果定 |
-| `fabric_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" | 取该 MC 分支里**较早**的一版（现为 `0.97.6+1.20.5`；该分支最早是 `0.91.4+1.20.5`） |
+| `fabric_version` | ❌ | 编译期 Fabric API，决定"代码最多能用多新的 API" | 取该 MC 分支里**较早**的一版（现为 `0.83.0+1.20`；该分支最早是 `0.76.1+1.20`） |
 | `loom_version` | ❌ | Gradle 构建插件（反编译 / 重映射 / 开发环境） | 见下 |
 | `yarn_mappings` | ❌ | 编译期把混淆名映射为可读名 | 只有更换 `minecraft_version` 时才需同步改 |
 
 **`loader_version` 的取值**：本 Mod 用到的 loader 成员只有 7 个
 （`FabricLoader#getInstance/getConfigDir/getModContainer`、`ModContainer#getMetadata`、
 `ModMetadata#getVersion`、`Version#getFriendlyString`、`ModInitializer#onInitialize`），
-全部自 2019 年起就存在。当前取 **0.15.11**——即 MC 1.20.5 发布（2024-04-23）前后的同期 loader，
-编译通过本身就是"这些成员在 0.15.11 中仍然存在"的证据。
+全部自 2019 年起就存在。当前取 **0.14.21**——即 MC 1.20 发布（2023-06-02）前后的同期 loader，
+编译通过本身就是"这些成员在 0.14.21 中仍然存在"的证据。
 **Fabric Loader 同样是向后兼容的**（新版能跑旧模组），所以门槛设低只会放宽、不会收紧。
 
 **Loom 的取向与它们相反**：Loom 的版本要按**你打算编译的最高 MC 版本**来选——
@@ -412,7 +414,7 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 **Fabric API 是向后兼容的**：新版保留旧 API，因此用旧 API 编译的模组在新版 Fabric API 上照常运行；
 反过来才可能出问题。本 Mod 的 jar 里只引用了两个 Fabric API 类——
 `CommandRegistrationCallback` 与它的父类型 `Event`（2019 年即存在），
-所以 Fabric API 从 `0.97.6+1.20.5` 到该分支最新版都能运行。
+所以 Fabric API 从 `0.83.0+1.20` 到该分支最新版都能运行。
 `depends.fabric-api` 因此保持 `*`（允许任意版本），不额外设下限以免误伤。
 
 ### 在哪里查版本
@@ -440,7 +442,7 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 4. 原版上限为 1 且不可损坏的物品（床、鞍、鱼桶、唱片等）会变为可堆叠。
    如不需要，请加入 `nonStackableItems`。
 5. 堆叠数量提示在数量 ≥ 1000 时显示；角标数字在 ≥ 1000 时缩写为 K / M / B。
-6. 本模组不提供物品上限数据表——原版上限直接读自物品组件，对模组物品同样有效。
+6. 本模组不提供物品上限数据表——原版上限直接读自物品（`Item#getMaxCount()`），对模组物品同样有效。
 7. **调低 `global_max` 不会销毁已有物品**：已经超过新上限的堆叠会原样保留，
    只是此后无法再把更多物品放进该格（GUI 侧一次最多放入新上限以内的数量）。
    这与玩家背包的行为一致，详见[第七节](#七三处安全夹取防止调低上限时丢物品)。
@@ -457,7 +459,7 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 
 产物位于 `build/libs/`，只有一个文件：
 
-- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 模组文件本身（如 `BetterItemStack-1.0.3-1.20.5-1.21.4.jar`）
+- `BetterItemStack-<Mod版本>-<MC区间>.jar` — 模组文件本身（如 `BetterItemStack-1.3.0-1.20-1.20.4.jar`）
 
 本项目**不生成 `-sources.jar`**（Fabric 官方示例模板里的 `withSourcesJar()` 已去掉）：源码本来就在
 仓库里公开，那个文件只对"把本模组当依赖库引用、需要在 IDE 里挂源码"的开发者有意义，
@@ -478,18 +480,18 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 3. 提交并推送，然后打 tag 推送：
 
    ```bash
-   git tag v1.0.3
-   git push origin v1.0.3
+   git tag v1.3.0
+   git push origin v1.3.0
    ```
 
-工作流会构建、从 `CHANGELOG.md` 抽取 `## 1.0.3` 一节作为 Release 正文，
+工作流会构建、从 `CHANGELOG.md` 抽取 `## 1.3.0` 一节作为 Release 正文，
 并把 `build/libs/*.jar` 作为附件上传。同一个 tag 重跑时会**更新**已有 Release，不会报错。
 
-tag 名带不带 `v` 前缀都可以（`v1.0.3` 与 `1.0.3` 等价，抽取时会自动剥掉前缀）；
-`+` 之后的内容会被忽略，所以将来若要写 `v1.0.3+mc1.20.5-1.21.4` 这类 semver 元数据也能正确抽取。
+tag 名带不带 `v` 前缀都可以（`v1.3.0` 与 `1.3.0` 等价，抽取时会自动剥掉前缀）；
+`+` 之后的内容会被忽略，所以将来若要写 `v1.3.0+mc1.20-1.20.4` 这类 semver 元数据也能正确抽取。
 
 > **tag 只用版本号，不要把 MC 区间写进去。** 区间已经出现在三个更合适的位置：产物文件名、
-> Release 标题（CI 会自动拼成 `v1.0.3 (Minecraft 1.20.5–1.21.4)`），以及上文的兼容性表。
+> Release 标题（CI 会自动拼成 `v1.3.0 (Minecraft 1.20–1.20.4)`），以及上文的兼容性表。
 > 把区间塞进 tag（例如 `V1.0.1_1.21.1-1.21.4`）会有实际代价：CI 是拿 tag 名去 `CHANGELOG.md`
 > 里找 `## <版本号>` 小节，归一化后的名字匹配不上，就会**静默回退**成把整份更新日志当成 Release 正文。
 > 主流模组（AppleSkin、JEI、REI、Botania、Mod Menu 等）同样只用纯版本号作 tag。
@@ -499,7 +501,7 @@ tag 名带不带 `v` 前缀都可以（`v1.0.3` 与 `1.0.3` 等价，抽取时�
 | 步骤 | 操作 |
 |---|---|
 | 推送代码 | 右上角工具栏的 **↑（Push）**，或菜单 `Git` → `Push...`（`Ctrl+Shift+K`）；对话框里确认提交后点 `Push` |
-| 打 tag | `Git` → `New Tag...`（旧版在 `VCS` → `Git` → `New Tag...`）；或在 Git 日志中**右键最新提交** → `New Tag...`，填 `v1.0.3` |
+| 打 tag | `Git` → `New Tag...`（旧版在 `VCS` → `Git` → `New Tag...`）；或在 Git 日志中**右键最新提交** → `New Tag...`，填 `v1.3.0` |
 | 推送 tag | 再次 `Git` → `Push...`，**务必勾选对话框底部的 `Push tags`**，下拉选 `All`，再点 `Push` |
 
 > **最容易漏掉的一步是最后一个**：tag 只创建在本地时不会触发任何 CI，"产物没更新"往往就出在这里。
@@ -525,7 +527,7 @@ src/main/java/com/zhugey/betteritemstack/
 ├── BetterItemStack.java              入口：加载配置、注册 /bis 指令（全部输出走翻译键）
 ├── Config.java                       配置读写与静态 global_max
 ├── ContainerPolicy.java              容器分类：是否提升、物品层上限、格子层上限
-├── VanillaMax.java                   读取"原版上限"（直接读物品组件，不受本模组改写影响）
+├── VanillaMax.java                   读取"原版上限"（读 Item#getMaxCount()，不受本模组改写影响）
 └── mixin/
     ├── ItemStackMixin.java           物品上限、序列化 Codec、堆叠数量提示
     ├── InventoryMixin.java           容器每格上限按类型区分
