@@ -9,8 +9,9 @@
 - 基于 [ItemStackProMax](https://github.com/develk-coder/ItemStackProMax) 二次开发
 - 仓库：<https://github.com/Zhugey/betteritemstack>
 
-> 本分支对应 Minecraft **1.21.5** 系列。若你使用 1.21.1 – 1.21.4，请改用 **1.21.1 分支**的产物——
-> 两个分支各自针对其编译目标产出 intermediary 命名空间的 jar，不能互换。
+> 本分支对应 Minecraft **1.21.5 – 1.21.10**。若你使用 **1.21.1 – 1.21.4**，请改用 **1.21.1 分支**的产物；
+> 使用 **1.21.11** 则改用 **1.21.11 分支**的产物——
+> 各分支针对自己的编译目标产出 intermediary 命名空间的 jar，不能互换。
 
 ---
 
@@ -327,7 +328,7 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 | Minecraft | 结论 | 原因 |
 |---|---|---|
 | **1.21.5 – 1.21.10** | ✅ **同一个 jar 直接可用** | 全部符号与字节码调用画像一致 |
-| 1.21.11 | ❌ 需修改代码 | `CommandSource#hasPermissionLevel(int)` 被新的权限体系取代（`ServerCommandSource#permissions` / `withPermissions`），`/bis set`、`/bis reload` 的权限判定需改写 |
+| 1.21.11 | ❌ **本分支不适用** | 权限体系换代：`CommandSource#hasPermissionLevel(int)` 被新的 `PermissionPredicate` 体系取代，本构建在 1.21.11 上会因符号不存在而无法启动。请改用 **1.21.11 分支**的产物 |
 | 1.21.4 及以下 | ❌ 不适用 | 本构建针对 1.21.5 编译。1.21.5 把组件读取方法迁移到了新的接口体系（`ComponentHolder#get` 从声明方法变为 default 方法），intermediary 名随之变化，旧版本里不存在。请改用 **1.21.1 分支**的产物 |
 
 上述结论都能用**静态检查**复现，不需要实机逐个版本运行。三项检查分别是：
@@ -356,8 +357,9 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 > 本分支已人工核对 1.21.5 的 `ItemStack`：`<clinit>` 存在，且 `(RegistryEntry, int, ComponentChanges)`
 > 构造函数存在。
 
-> 若要支持 1.21.11+，需要改写权限判定（`/bis set`、`/bis reload`）；这属于跨版本适配，
-> 不在 1.1.x 的范围。
+> **1.21.11 已经单独出一条分支**（见 **1.21.11 分支**）：那一版权限体系换代，
+> 需要把 `/bis set`、`/bis reload` 的权限判定改写成 `CommandManager.MODERATORS_CHECK`，
+> 属于跨版本适配，不在 1.1.x 的范围。
 
 ### `gradle.properties` 里的版本号分别管什么
 
