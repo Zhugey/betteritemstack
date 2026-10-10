@@ -23,6 +23,7 @@
 - [配置](#配置)
 - [指令](#指令)
 - [兼容性与已知限制](#兼容性与已知限制)
+- [与其他模组的冲突风险](#与其他模组的冲突风险)
 - [从源码构建](#从源码构建)
 - [项目结构](#项目结构)
 - [许可与致谢](#许可与致谢)
@@ -442,6 +443,58 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 7. **调低 `global_max` 不会销毁已有物品**：已经超过新上限的堆叠会原样保留，
    只是此后无法再把更多物品放进该格（GUI 侧一次最多放入新上限以内的数量）。
    这与玩家背包的行为一致，详见[第七节](#七三处安全夹取防止调低上限时丢物品)。
+
+---
+
+## 与其他模组的冲突风险
+
+本模组直接改写原版行为，**凡是触及同一批原版目标的模组都可能互相干扰**。
+下面把本分支实际改动的原版位置全部列出，方便出问题时对号入座。
+
+### 本分支触及的原版目标
+
+| Mixin | 改动的原版位置 |
+|---|---|
+| `ItemStackMixin` | `ItemStack.<clinit>`（重写 `CODEC`，把 count 的范围从 `rangedInt(1, 99)` 放宽到 `rangedInt(1, Integer.MAX_VALUE)`）、`getMaxCount`、`getTooltip` |
+| `InventoryMixin` | `Inventory#getMaxCountPerStack`、`Inventory#getMaxCount(ItemStack)` |
+| `SlotMixin` | `Slot#getMaxItemCount(ItemStack)` |
+| `HopperBlockEntityMixin` | `HopperBlockEntity` 的 `isInventoryFull`、`transfer`、`canMergeItems`、`isFull` 里的 `ItemStack#getMaxCount()` |
+| `ItemEntityMixin` | `ItemEntity#merge` |
+| `client.DrawContextMixin` | `DrawContext#drawStackOverlay`（1.21.11 起由 `drawItemInSlot` 改名而来） |
+
+### 几类最容易冲突的模组
+
+1. **同类堆叠模组**——风险最高。它们与本模组抢的是同一批目标，尤其 `ItemStack#getMaxCount()`
+   与 `ItemStack.CODEC`。两个模组都改同一处时，**后执行的那个覆盖先执行的**，而且**不会有任何报错**
+   ——表现为"其中一个完全没起作用"。**请勿与本模组同时安装其它堆叠模组。**
+2. **重写 `ItemStack.CODEC` 的模组**——见下方特别提示。
+3. **漏斗 / 物流 / 红石类模组**——它们常改写 `HopperBlockEntity`，与本模组的四处改动重合。
+4. **容器界面类模组**——改动 `Slot#getMaxItemCount`、容器容量或数量文字绘制的模组，
+   可能与本模组在 GUI 侧的改动叠加。
+
+### 冲突会以什么形式出现
+
+- **启动即崩**：日志里出现 `Mixin apply for mod betteritemstack failed` 或
+  `Critical injection failure`。这类多半是 `@Redirect` 找不到目标——目标已被另一个模组改掉。
+  这是**最好的一种**，问题立刻可见。
+- **静默失效**：两个模组都注入成功、语义互相覆盖，游戏照常启动，只是行为不对。最难查。
+- **运行期错乱**：数量显示或同步异常、整格物品消失、GUI 行为怪异。
+
+### 排查步骤
+
+1. 先看 `logs/latest.log` 里有没有 Mixin 相关的 `ERROR`；
+2. 只留本模组（+ 原版）跑一次，确认单独工作正常；
+3. 二分法把其它模组加回来，定位到具体哪一个。
+
+### 特别提示：本分支重写了 `ItemStack.CODEC`
+
+原版自 1.20.5 起就用 **Codec** 序列化物品，其中 `count` 字段被限定为 `rangedInt(1, 99)`；
+本模组在 `ItemStack.<clinit>` 的末尾把整个 `CODEC` 替换成放宽了范围的版本。由此带来两类风险：
+
+- **任何同样替换 `ItemStack.CODEC` 的模组会与本模组互相覆盖**——后执行的生效、不报错，
+  表现为其中一个失效；
+- **联机时两端都建议装本模组**：数量超过 99 时，未装的一端仍按原版 `rangedInt(1, 99)` 校验，
+  解码会失败；**数量 ≤99 时完全兼容**。
 
 ---
 
