@@ -12,10 +12,12 @@
 
 ## 1.3.1 — 2026-10-10
 
-**修复 1.20 – 1.20.4 上「创造模式取出一整摞物品，一打开箱子就没了」的一组缺陷（共三处）。**
+**修复 1.20 – 1.20.4 上的两组缺陷。**
 
-实测现象：创造模式取出的整摞物品（`global_max`，默认 9999）**看着**已经堆叠成功，但一打开箱子
-那一格就空了。下面三处各自都能单独造成这个结果，全部修掉才恢复正常。
+- 第一组（缺陷一 ~ 三）：创造模式取出的整摞物品（`global_max`，默认 9999）**看着**已经堆叠成功，
+  但一打开箱子那一格就空了。三处各自都能单独造成这个结果，全部修掉才恢复正常。
+- 第二组（缺陷四 ~ 五）：物品确实放得进去、也一个没少，但**客户端把箱子格子显示成 64**，
+  拖拽分堆时每格也只落 64。问题出在客户端侧的容器判定与拖拽分堆计算上。
 
 ### 缺陷一：数量在传输与存档时被 8 位字节截断
 
@@ -66,6 +68,59 @@
 后果是**全部 Mixin 一起失效**（模组看起来正常加载，却什么都不起作用）。
 改成 `JAVA_17`：与本分支的编译目标一致，也兼容更低版本的加载器。
 
+### 缺陷四：客户端把箱子判成"未识别容器"，格子数量被显示成 64
+
+实测现象：把一整摞（`global_max`，例如 6484）放进箱子后，**箱子那一格显示 64**；
+但物品一个没少——取回背包仍是原数量，存档里也是原数量。
+
+原因是打开容器时，**客户端与服务端走的是两条不同的构造路径**：
+
+| 侧 | 构造器 | 容器实例 | `ContainerPolicy#keyOf` | 每格上限 |
+|---|---|---|---|---|
+| 服务端 | `createGeneric9x3(int, PlayerInventory, Inventory)` | `ChestBlockEntity` | `chest` | `global_max` |
+| 客户端 | `createGeneric9x3(int, PlayerInventory)` | `new SimpleInventory(9 * rows)` | `null`（未识别） | 64 |
+
+客户端那条是原版的"界面构造器"：收到 `OpenScreenS2CPacket` 后由 `ScreenHandlerType` 的工厂构造，
+容器只能是一个临时的 `SimpleInventory` 镜像——它不属于任何方块实体，因此落不进
+`ContainerPolicy#keyOf` 的 `instanceof` 链，在 `unknown = false`（默认）下被判为
+"未识别容器不提升"，容量退回 64。
+
+后果分两层：
+
+1. 服务端同步过来的大堆叠，在客户端被 `SimpleInventory#setStack` 里的
+   `if (count > getMaxCountPerStack()) stack.setCount(getMaxCountPerStack());` **截断成 64 显示**
+   （服务端数据不受影响，后续同步始终以服务端为准）；
+2. 客户端 `HandledScreen#drawSlot` 的拖拽预览按 64 计算。
+
+**修复**：新增 `ScreenHandlerMixin`，在 `ScreenHandler#addSlot`（所有界面构建槽位的唯一入口）
+按界面自身的 `ScreenHandlerType` 反推它镜像的是哪类方块容器，登记进 `ContainerPolicy` 的镜像表
+（`WeakHashMap`，界面关闭即回收），`keyOf` 优先查该表。
+
+`GENERIC_9X1..6` 同时覆盖箱子、大箱子、木桶与末影箱，客户端无从区分，统一按 `chest` 处理；
+该近似只影响客户端的容量显示与预览，真正的增删改始终由服务端真实方块实体决定，不会产生数据差异。
+服务端的方块容器都不是 `SimpleInventory`，天然不入表；马匹（其界面类型注册为 `null`）、商人、
+信标等真正以 `SimpleInventory` 为数据源的界面，也因其 `ScreenHandlerType` 不在映射表内而不登记。
+
+### 缺陷五：中键拖拽分堆时每格只落 64 个
+
+`ScreenHandler#calculateStackSize` 决定拖拽时每个格子落多少：
+
+    case 0 -> MathHelper.floor(stack.getCount() / slots.size());  // 左键：均分
+    case 1 -> 1;                                                  // 右键：每格 1 个
+    case 2 -> stack.getItem().getMaxCount();                      // 中键：每格一"满堆"
+
+`case 2` 读的是 `Item#getMaxCount()`（**物品级**上限，恒为 64），而不是被本模组放大的
+`ItemStack#getMaxCount()`——同一个表达式在别处都已经走 `ItemStack`，只有这里漏了。
+该分支在客户端与服务端都会执行（客户端 `HandledScreen#drawSlot` 用它画预览，服务端
+`internalOnSlotClick` 用它算实际落格数量），所以现象是"预览显示 64，实际也只落 64"。
+
+**修复**：`ScreenHandlerMixin` 用 `@Redirect` 把那次 `Item#getMaxCount()` 换成
+`ItemStack#getMaxCount()`。语义反而更自洽——"每格放满一摞"，而"一摞"是多少由本模组决定。
+安全性由调用方保证：客户端与服务端都会把结果再与
+`min(cursorStack.getMaxCount(), slot.getMaxItemCount(cursorStack))` 取一次最小值，
+因此漏斗、附魔台这类**不提升**的容器依旧只能落原版数量；带耐久度与黑名单物品的
+`getMaxCount()` 本来就是原版值，行为不变。
+
 ### 兼容性
 
 VarInt 对 0 ~ 127 就是单个字节，NBT 侧 `putInt` 与 `putByte` 读出来也一样，因此对端未装本模组时
@@ -88,6 +143,19 @@ VarInt 对 0 ~ 127 就是单个字节，NBT 侧 `putInt` 与 `putByte` 读出来
   会把接口成员名传播到实现类。
 - README 更正：本分支**没有** `ItemStack.<clinit>` 的 Codec 重写注入——那是 1.20.5 起原版把数量
   收窄成 `rangedInt(1, 99)` 才需要的，本代 Codec 里的数量本来就不限范围。
+- 缺陷四/五的验证：`ScreenHandlerMixin` 的两个目标都声明在 `ScreenHandler` 自身（不像
+  `onCreativeInventoryAction` 那样只挂在接口名下），构建后 javap 逐条确认注解已就地重映射为
+  `method_7621(...)`、`method_7617(...)` 与 `Lnet/minecraft/class_1792;method_7882()I`。
+  `@Shadow` 的目标是 `ScreenHandler` 的 **private final** 字段 `type`（中介名 `field_17493`）；
+  之所以不调 `getType()`：原版对未注册类型的界面（如马匹）会抛 `UnsupportedOperationException`，
+  而该情形在 `addSlot` 期间必然出现。
+- **`@Inject` handler 的末参必须跟随目标方法的返回类型**：`ScreenHandler#addSlot` 返回 `Slot`，
+  handler 就必须收 `CallbackInfoReturnable<Slot>`，写成 `CallbackInfo` 会**构建照常通过**，
+  直到启动才被 Mixin 以 `InvalidInjectionException: CallbackInfoReturnable is required!` 拒收，
+  并连带 `ScreenHandler` 类加载失败（`Blocks.<clinit>` → `Minecraft has crashed!`），
+  表现为"游戏直接进不去"。为此新增离线校验脚本 `handler_sig_check.py`：静态核对每个 `@Inject`
+  的末参回调类型（按目标返回 void / 非 void 区分 `CallbackInfo` 与 `CallbackInfoReturnable`），
+  以及每个 `@Redirect` 的 handler 返回类型是否等于被重定向的方法/字段类型。
 
 ---
 

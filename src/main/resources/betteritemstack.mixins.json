@@ -9,6 +9,7 @@
     "ItemEntityMixin",
     "ItemStackMixin",
     "PacketByteBufMixin",
+    "ScreenHandlerMixin",
     "ServerPlayNetworkHandlerMixin",
     "SlotMixin"
   ],

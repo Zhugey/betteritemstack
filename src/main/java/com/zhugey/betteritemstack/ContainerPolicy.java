@@ -14,9 +14,14 @@ import net.minecraft.entity.vehicle.HopperMinecartEntity;
 import net.minecraft.inventory.DoubleInventory;
 import net.minecraft.inventory.EnderChestInventory;
 import net.minecraft.inventory.Inventory;
+import net.minecraft.inventory.SimpleInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.screen.ScreenHandlerType;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * 容器提升策略。
@@ -69,7 +74,102 @@ public final class ContainerPolicy {
             "brewing_stand"
     );
 
+    /**
+     * 客户端 GUI 镜像容器的登记表：键是界面里那个临时的容器实例，值是它镜像的方块容器配置键。
+     *
+     * <p><b>为什么需要它</b>：原版客户端打开方块容器时走的是
+     * {@code GenericContainerScreenHandler#createGeneric9xN(int, PlayerInventory)} 这类
+     * <b>客户端专用</b>工厂，其实现是 {@code new SimpleInventory(9 * rows)}——也就是说客户端那一侧的
+     * {@code Slot#inventory} 并不是箱子方块实体，而是一个临时的 {@link SimpleInventory} 镜像。
+     * 服务端走的则是 {@code createGeneric9xN(int, PlayerInventory, Inventory)}，容器是真实的
+     * {@code ChestBlockEntity}。
+     *
+     * <p>{@link #keyOf(Inventory)} 的 {@code instanceof} 链只认识真实方块实体，对
+     * {@link SimpleInventory} 只能返回 {@code null}。于是同一个箱子在两侧被判定成不同的容器：
+     * 服务端为 {@code global_max}，客户端却因"未识别容器"（{@code unknown=false}）退回 64。
+     * 两侧不一致后会有两处可见症状：
+     * <ol>
+     *   <li>服务端同步过来的大堆叠，在客户端被
+     *       {@code SimpleInventory#setStack} 里的 {@code setCount(getMaxCountPerStack())} 截断成 64
+     *       ——格子显示 64，但服务端数据完好；</li>
+     *   <li>客户端 {@code HandledScreen} 的拖拽预览按 64 计算。</li>
+     * </ol>
+     *
+     * <p>因此由 {@code ScreenHandlerMixin} 在每个槽位挂载时调用
+     * {@link #rememberMirrorContainer(ScreenHandlerType, Inventory)}，按界面的
+     * {@link ScreenHandlerType} 反推它镜像的是哪类方块容器，{@link #keyOf(Inventory)} 优先查本表。
+     *
+     * <p><b>不会误伤服务端</b>：真实方块容器都不是 {@link SimpleInventory}，天然不入表；真正以
+     * {@link SimpleInventory} 作为数据源的马匹（其界面类型为 {@code null}）、商人、信标等界面，
+     * 则因为其 {@code ScreenHandlerType} 不在 {@link #keyOfHandlerType} 的映射表内而不登记。
+     *
+     * <p>用 {@code WeakHashMap} 是为了让界面关闭后镜像容器能被正常回收；这类对象只被当前
+     * {@code ScreenHandler} 持有，不存在长期存活的引用。
+     */
+    private static final Map<Inventory, String> MIRROR_CONTAINERS =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
     private ContainerPolicy() {
+    }
+
+    /**
+     * 把客户端界面的 {@link ScreenHandlerType} 映射为容器配置键名。
+     *
+     * <p>客户端只知道"打开的是哪种界面"，并不知道方块实体类型，所以这个映射必然是近似的：
+     * {@code GENERIC_9X1..6} 同时覆盖箱子、大箱子、木桶与末影箱，这里统一按 {@code chest} 处理。
+     * 该近似只影响客户端侧的容量显示与拖拽预览；真正的增删改始终由服务端的真实方块实体决定，
+     * 因此不会造成任何数据差异。
+     *
+     * @param type 界面类型，允许为 {@code null}（例如马匹界面就没有注册类型）
+     * @return 对应的容器键名；不属于可提升方块容器的界面返回 {@code null}
+     */
+    public static String keyOfHandlerType(ScreenHandlerType<?> type) {
+        if (type == null) {
+            return null;
+        }
+        if (type == ScreenHandlerType.GENERIC_9X1
+                || type == ScreenHandlerType.GENERIC_9X2
+                || type == ScreenHandlerType.GENERIC_9X3
+                || type == ScreenHandlerType.GENERIC_9X4
+                || type == ScreenHandlerType.GENERIC_9X5
+                || type == ScreenHandlerType.GENERIC_9X6) {
+            return "chest";
+        }
+        if (type == ScreenHandlerType.SHULKER_BOX) {
+            return "shulker_box";
+        }
+        if (type == ScreenHandlerType.HOPPER) {
+            return "hopper";
+        }
+        if (type == ScreenHandlerType.GENERIC_3X3) {
+            return "dispenser";
+        }
+        if (type == ScreenHandlerType.FURNACE
+                || type == ScreenHandlerType.BLAST_FURNACE
+                || type == ScreenHandlerType.SMOKER) {
+            return "furnace";
+        }
+        if (type == ScreenHandlerType.BREWING_STAND) {
+            return "brewing_stand";
+        }
+        return null;
+    }
+
+    /**
+     * 登记一个"客户端 GUI 镜像容器"，由 {@code ScreenHandlerMixin} 在挂载槽位时调用。
+     *
+     * @param type      当前界面的类型
+     * @param inventory 该槽位所属的容器
+     */
+    public static void rememberMirrorContainer(ScreenHandlerType<?> type, Inventory inventory) {
+        if (!(inventory instanceof SimpleInventory)) {
+            // 真实方块容器不是 SimpleInventory，服务端调用会在这里直接返回。
+            return;
+        }
+        String key = keyOfHandlerType(type);
+        if (key != null) {
+            MIRROR_CONTAINERS.put(inventory, key);
+        }
     }
 
     /**
@@ -88,6 +188,8 @@ public final class ContainerPolicy {
         if (inventory == null) {
             return null;
         }
+        // 客户端 GUI 的镜像容器（SimpleInventory）不是任何方块实体，落到下面的 instanceof 链
+        // 只会返回 null，导致客户端与服务端的容量判定不一致——它在链尾兜底处理。
         // 注意顺序：DropperBlockEntity 继承自 DispenserBlockEntity，必须先判子类。
         // DoubleInventory（大箱子）内部委托给 ChestBlockEntity。
         if (inventory instanceof PlayerInventory) {
@@ -131,7 +233,11 @@ public final class ContainerPolicy {
         }
         // 注：1.21 起还有 CrafterBlockEntity（合成器），本分支的支持区间（1.20 – 1.20.4）
         // 没有这个方块，故不列出，否则会引到一个不存在的类。
-        return null;
+        //
+        // 链上都没命中，最后才查客户端 GUI 的镜像容器登记表。放在这里而不是开头，是因为
+        // 真实方块容器在上面就已经返回，没必要为了让镜像容器早识别而在 GUI 的高频渲染路径上
+        // （每个槽位每帧都会走 Slot#getMaxItemCount）多做一次同步表查询。
+        return MIRROR_CONTAINERS.get(inventory);
     }
 
     /**

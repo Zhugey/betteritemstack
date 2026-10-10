@@ -151,6 +151,8 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 | `ServerPlayNetworkHandlerMixin` | `ServerPlayNetworkHandler#onCreativeInventoryAction` 里的 `getCount()` | 创造模式取物的服务端校验由硬编码 64 改为真实上限（见第八节） |
 | `InventoryMixin` | `Inventory#getMaxCountPerStack` | 按容器类型区分每格容量 |
 | `SlotMixin` | `Slot#getMaxItemCount(ItemStack)` | GUI 侧容量，保留槽位自身声明的上限 |
+| `ScreenHandlerMixin` | `ScreenHandler#addSlot` | 客户端 GUI 的 `SimpleInventory` 镜像容器按界面类型登记，与服务端判定对齐 |
+| | `ScreenHandler#calculateStackSize` 里的 `Item#getMaxCount()` | 中键拖拽分堆的每格数量跟随堆叠上限 |
 | `HopperBlockEntityMixin` | 漏斗内 4 处 `getMaxCount()` | 判定对象决定上限来源 |
 | `ItemEntityMixin` | `ItemEntity#merge` | 掉落物合并上限 |
 | `DrawContextMixin`（客户端） | `DrawContext#drawItemInSlot` | 角标数字缩写为 K / M / B |
@@ -370,7 +372,7 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 | 1.21.5 – 1.21.10 | ❌ **本分支不适用** | 请改用 **1.21.5 分支**的产物 |
 | 1.21.11 | ❌ **本分支不适用** | 请改用 **1.21.11 分支**的产物 |
 
-上述结论都能用**静态检查**复现，不需要实机逐个版本运行。三项检查分别是：
+上述结论都能用**静态检查**复现，不需要实机逐个版本运行。四项检查分别是：
 
 1. **注入目标与符号引用核对** —— 从构建产物中提取 **Mixin 的注入目标**与 **class 常量池里的全部
    intermediary 引用**，逐个到 1.20 – 1.21.11 的 intermediary 映射中核对存在性与描述符。
@@ -391,6 +393,15 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
    用 `packet_count_check.py`，创造模式那条 `onCreativeInventoryAction` 里的 `ItemStack#getCount()`
    用 `creative_count_check.py`。网络侧那个脚本还会断言**两个写变体里恰好命中一个**——写侧之所以有两个变体，
    见[第八节](#八数量本身也要装得下两处-8-位上限)与 `PacketByteBufMixin` 的类注释。
+4. **handler 签名核对** —— 这类错误既不在常量池、也不改符号，构建与上面三项检查都看不出来，
+   只在**启动时**由 Mixin 校验并抛异常（会连带目标类加载失败，表现为"游戏进不去"）。
+   用 `handler_sig_check.py` 核对两类：
+   - `@Inject`：目标返回 `void` ⇒ handler 末参必须是 `CallbackInfo`；目标有返回值 ⇒
+     必须是 `CallbackInfoReturnable`。（`ScreenHandler#addSlot` 返回 `Slot`，就踩过这个坑。）
+   - `@Redirect`：handler 的返回类型必须等于被重定向的方法/字段的类型。
+
+   写注解时**建议把 `method=` 写成 `名字(描述符)返回类型` 的完整形式**；只写方法名
+   （如 `method = "canMergeItems"`）时脚本无法判定返回类型，只能给出告警。
 
 > 已知盲区：**构造函数与 `<clinit>`** 不在 intermediary 映射文件里（实测收录 0 条），
 > 无法用上述方式核对，需人工用 `javap` 取目标类签名再与 Yarn 映射对照。
@@ -597,6 +608,7 @@ src/main/java/com/zhugey/betteritemstack/
     ├── ServerPlayNetworkHandlerMixin.java  创造模式取物的上限校验（本代原版写死 64）
     ├── InventoryMixin.java           容器每格上限按类型区分
     ├── SlotMixin.java                GUI 槽位容量（保留槽位自身声明的上限）
+    ├── ScreenHandlerMixin.java       客户端镜像容器登记 + 中键拖拽分堆数量
     ├── HopperBlockEntityMixin.java   漏斗容量判定接回容器感知逻辑
     ├── ItemEntityMixin.java          掉落物合并上限
     └── client/DrawContextMixin.java  角标数字缩写
