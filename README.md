@@ -23,6 +23,7 @@
 - [配置](#配置)
 - [指令](#指令)
 - [兼容性与已知限制](#兼容性与已知限制)
+- [与其他模组的冲突风险](#与其他模组的冲突风险)
 - [从源码构建](#从源码构建)
 - [项目结构](#项目结构)
 - [许可与致谢](#许可与致谢)
@@ -217,6 +218,113 @@ boolean valid = stack.isEmpty()
 > 为什么不直接把常量 64 改掉：`bipush` 只能承载 -128 ~ 127，而 `global_max` 可以在游戏内
 > 随意调高，写死任何值都会在某个上限下重新失效。
 
+### 九、与 Stackable 的对比：同类模组为何停在 127，本模组如何做到任意数量
+
+[Stackable](https://github.com/Colin12345678910/Stackable) 的 README 里有一段很坦诚的解释：
+
+> Minecraft stores all items with a single signed byte which for our purposes only can be
+> between -128 to 127, since negative values are invalid that leaves a maximum stack size of 127.
+> Moreover, this mod is intended to be compatible with other mods which may also use signed
+> bytes to store items.
+>
+> As of Stackable 1.1.4 and Minecraft 1.20.5, this mod now can work with stack sizes above 127,
+> however, **for versions below 1.20.5, the following is still accurate.**
+
+这段话把问题说得很准：**127 不是设计选择，而是"有符号字节"的物理上限**；
+它同时点出了分水岭——**Minecraft 1.20.5**。
+
+#### 127 是怎么来的
+
+原版有两处把数量直接塞进**一个有符号字节**：
+
+| 路径 | 原版写法 | 单字节能表达的范围 |
+|---|---|---|
+| 网络包 | `PacketByteBuf#writeItemStack` 里 `writeByte(stack.getCount())` | −128 ~ 127 |
+| 存档 NBT | `ItemStack#writeNbt` 里 `putByte("Count", (byte) count)` | 同上 |
+
+后果分三档：
+
+- **0 ~ 127**：正常；
+- **128 ~ 255**：读回来是**负数**（128 → −128，200 → −56）；
+- **256 的整数倍**：读回来是 **0**。
+
+而 `ItemStack#isEmpty()` 的判定正是 `count <= 0`——所以数量一旦越过 127，物品不是"变少"，
+而是**整格消失**。把上限设在 127，等于**在不触碰编码格式的前提下，取编码能安全承载的最后一格**。
+
+#### 分水岭为什么是 1.20.5
+
+1.20.5 起，原版把物品的网络与存档序列化**从手写字节流换成了 Codec**（`ItemStack.CODEC`），
+数量在数据模型里由 `rangedInt(1, 99)` 描述。Codec 是**自描述**的、范围写在模型里，
+因此只要重写那个范围就能放开上限——**完全不需要碰传输层的字节**。
+
+这正好解释了 Stackable 的两个时间点：它能突破 127 是在 1.20.5 及以后（自 1.1.4 起），
+而 1.20.5 之前不能——那一代原版还是手写字节流，数量就是一个 `writeByte`。
+
+#### 1.20.5 之前：只改数值会连锁失效
+
+数值改了，数据却仍在四条路径上按 8 位走：
+
+| 触发场景 | 走哪条路径 | 现象 |
+|---|---|---|
+| 打开容器 / 拾取 / GUI 点击 | 整包同步 `InventoryS2CPacket` → `writeItemStack` | 数量错乱，偶发整格消失 |
+| 退出重进 / 区块重载 / 掉落物 | `ItemStack#writeNbt` | 存档里的数量被截断 |
+| 创造模式取一整摞 | `onCreativeInventoryAction` 的 `count <= 64` 硬编码校验 | 静默丢弃（见第八节附注） |
+| 打开箱子看这一格 | 客户端 GUI 的容器是 `SimpleInventory` 镜像 | 容量判定退回 64，只显示 64 |
+
+#### 本模组改的是编码本身
+
+本模组支持的正是 **1.20 – 1.20.4**——**没有 Codec 可改**的那一代。没有"等原版"这条路，
+于是只能自己把两条编码路径替换掉：
+
+| 层 | 原版 | 不处理会怎样 | 本模组 |
+|---|---|---|---|
+| 物品层上限 | `ItemStack#getMaxCount()` → 64 / 16 / 1 | 堆不过原版值 | 返回 `global_max`；带耐久物品与黑名单物品保持原版 |
+| 容器与槽位容量 | `Inventory#getMaxCountPerStack()` = 64 | 界面与插入逻辑仍按 64 | 按容器类型分别给值，**漏斗显式保持原版** |
+| **网络编码** | `writeByte` / `readByte`（8 位） | 数量 >127 即错乱 | `PacketByteBufMixin` 改为 **VarInt** |
+| **存档编码** | `putByte("Count")` / `getByte` | 存档里的数量被截断 | `ItemStackMixin` 在 `writeNbt` 的 TAIL 用 `putInt` **覆盖**，`fromNbt` 用 `getInt` 还原 |
+| 服务端校验 | 写死 `getCount() <= 64` | >64 静默丢弃 | 改写成"是否超过当前上限" |
+| 客户端 GUI | 镜像容器不被识别 | 显示与拖拽预览都按 64 | 登记镜像容器，分堆数量跟随上限 |
+| 漏斗 | 64 停抽 | 红石计时器 / 计数器失效 | 显式保持原版 |
+
+关键只有**网络**与**存档**两条。这两条一旦解开，数量的存储与传输就与物品上限彻底无关了。
+
+#### 为什么用 VarInt，而不是直接换成 4 字节 int
+
+`writeItemStack` 是一条**位置相关**的二进制流：数量字段后面紧跟 NBT。若把 1 字节换成固定
+4 字节的 `writeInt`，包长度与字段偏移全部改变，**任何未装本模组的一端都会从 NBT 处开始错位**。
+
+VarInt 的价值正在于此：
+
+- 对 **0 ~ 127**，VarInt 恰好是一个字节，而且**逐位与原来的 `writeByte` 完全相同**；
+- 更大的值才逐级扩展（最多 5 字节，覆盖 32 位有符号范围）。
+
+也就是说，**数量在 127 以内时，本模组的包与原版逐字节一致**。没装本模组的一端读到小数量仍然完全
+正常；只有真的出现 >127 的数量才会不一致——而那本来也只有装了本模组才会产生。
+
+NBT 侧没有这个顾虑：NBT 是**自描述**格式（每个标签自带类型与长度），把 `Count` 由 ByteTag 换成
+IntTag 不会破坏结构。未装本模组的一端会把数量按低 8 位读（`getByte` 遇到 IntTag 会走
+`byteValue()`），数量偏小，但存档不会损坏。
+
+这也回应了 Stackable 自述里的另一层顾虑——它停在 127，还因为它希望与**其它同样用有符号字节
+存数量的模组**保持兼容。VarInt 恰好满足这一点：**小数量下逐位与原版相同**，按单字节解析的
+模组照常工作；只有真正出现大数量时才要求两端都装本模组。
+
+#### 那到底能堆到多少
+
+编码这一层已经不再是瓶颈：VarInt 与 NBT `int` 都是 32 位，理论上限约 **21.4 亿**。
+实际可用值由配置文件的 `global_max` 决定（默认 9999），可随时在游戏内用指令调整。
+
+#### 顺带一个定位上的差异
+
+Stackable 是"把**所有**容器的堆叠上限一起抬高"；本模组默认只提升玩家背包与箱子、木桶、
+潜影盒、末影箱等存储容器，**漏斗与漏斗矿车保持原版上限**——因为漏斗一旦不再"装满即停"，
+以 16 / 64 计数的红石计时器、计数器就会全部失效。这一行为可由配置调整（见 `containers`）。
+
+#### 前提
+
+数量 >127 时，**联机的两端都需要安装本模组**：只装一端的话，另一端仍按原版 8 位解析——
+网络包会从数量字段之后开始错位，而 NBT 侧只是数量偏小、不会崩。
+
 ---
 
 ## 安装
@@ -367,7 +475,7 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
 
 | Minecraft | 结论 | 原因 |
 |---|---|---|
-| **1.20 – 1.20.4** | ✅ **本分支的 jar** | 全部符号与字节码调用画像一致 |
+| **1.20 – 1.20.4** | ✅ **本分支的 jar** | 已在 **1.20.1 / 1.20.2 / 1.20.3 / 1.20.4 全部实测通过**，符号与字节码调用画像一致 |
 | 1.20.5 – 1.21.4 | ❌ **本分支不适用** | 本代还没有"栈上限重构"（缺 `Inventory#getMaxCount(ItemStack)`，物品组件也不存在），本构建在新一代上会因符号缺失而无法启动。请改用 **1.20.5 分支**的产物 |
 | 1.21.5 – 1.21.10 | ❌ **本分支不适用** | 请改用 **1.21.5 分支**的产物 |
 | 1.21.11 | ❌ **本分支不适用** | 请改用 **1.21.11 分支**的产物 |
@@ -523,6 +631,61 @@ Loom 与 MC 版本解耦（官方原话：*Loom is version-independent*）。
 
 ---
 
+## 与其他模组的冲突风险
+
+本模组直接改写原版行为，**凡是触及同一批原版目标的模组都可能互相干扰**。
+下面把本分支实际改动的原版位置全部列出，方便出问题时对号入座。
+
+### 本分支触及的原版目标
+
+| Mixin | 改动的原版位置 |
+|---|---|
+| `ItemStackMixin` | `ItemStack#getMaxCount`、`writeNbt`、`fromNbt`、`getTooltip` |
+| `PacketByteBufMixin` | `PacketByteBuf#writeItemStack` 里的 `writeByte`（两个变体）、`readItemStack` 里的 `readByte` 与它存进的局部变量 |
+| `ServerPlayNetworkHandlerMixin` | `ServerPlayNetworkHandler#onCreativeInventoryAction` 里的 `ItemStack#getCount()` |
+| `InventoryMixin` | `Inventory#getMaxCountPerStack` |
+| `SlotMixin` | `Slot#getMaxItemCount(ItemStack)` |
+| `ScreenHandlerMixin` | `ScreenHandler#addSlot`、`calculateStackSize` 里的 `Item#getMaxCount()` |
+| `HopperBlockEntityMixin` | `HopperBlockEntity` 的 `isInventoryFull`、"目标容器是否已满"的合成 lambda、`transfer`、`canMergeItems`、`isFull` 里的 `ItemStack#getMaxCount()` |
+| `ItemEntityMixin` | `ItemEntity#merge` |
+| `client.DrawContextMixin` | `DrawContext#drawItemInSlot` |
+
+### 几类最容易冲突的模组
+
+1. **同类堆叠模组**——风险最高。它们与本模组抢的是同一批目标，尤其 `ItemStack#getMaxCount()`。
+   两个模组都注入这个方法时，**先执行的那个生效**，后一个的返回值被直接丢弃，而且**不会有任何报错**
+   ——表现为"其中一个完全没起作用"。**请勿与本模组同时安装其它堆叠模组。**
+2. **改动物品序列化的模组**——见下方特别提示，本分支的风险最高。
+3. **漏斗 / 物流 / 红石类模组**——它们常改写 `HopperBlockEntity`，与本模组的四处改动重合。
+4. **容器界面类模组**——改动 `Slot#getMaxItemCount`、`ScreenHandler` 或数量文字绘制的模组，
+   可能与本模组在 GUI 侧的改动叠加。
+
+### 冲突会以什么形式出现
+
+- **启动即崩**：日志里出现 `Mixin apply for mod betteritemstack failed` 或
+  `Critical injection failure`。这类多半是 `@Redirect` 找不到目标——目标已被另一个模组改掉。
+  这是**最好的一种**，问题立刻可见。
+- **静默失效**：两个模组都注入成功、语义互相抵消，游戏照常启动，只是行为不对。最难查。
+- **运行期错乱**：数量显示或同步异常、整格物品消失、GUI 行为怪异。
+
+### 排查步骤
+
+1. 先看 `logs/latest.log` 里有没有 Mixin 相关的 `ERROR`；
+2. 只留本模组（+ 原版）跑一次，确认单独工作正常；
+3. 二分法把其它模组加回来，定位到具体哪一个。
+
+### 特别提示：本分支改动了网络与存档的编码
+
+1.20 – 1.20.4 这一代的原版把数量存成**有符号字节**，本模组必须替换两条编码路径
+（网络 `writeByte` → VarInt，NBT `putByte` → `putInt`，详见第九节）。由此带来两类额外风险：
+
+- **任何同样改动物品序列化的模组都必然冲突**——改的是同一段字节流的位置与长度，
+  不像上面那些可以靠"先执行者生效"勉强共存；
+- **联机时两端都要装本模组**：只装一端的话，数量一旦超过 127，未装的一端仍按原版单字节解析，
+  网络包会从数量字段之后开始错位（**数量 ≤127 时仍然完全兼容**）。
+
+---
+
 ## 从源码构建
 
 ```bash
@@ -636,6 +799,9 @@ src/main/resources/assets/betteritemstack/lang/
 
 - [Staaaaaaaaaaaack](https://modrinth.com/mod/staaaaaaaaaaaack) — 在物品实体生成前完成合并，
   并优化了背包爆炸运算，与本模组搭配效果良好
+- [Stackable](https://github.com/Colin12345678910/Stackable) — 同类堆叠模组。它自述在 1.20.5
+  之前受"有符号字节"的物理限制，只能堆到 127；本模组则在同样的 1.20 – 1.20.4 上自己改写了
+  编码层。两者的技术路线对比见上文第九节。
 
 ### 语言
 
