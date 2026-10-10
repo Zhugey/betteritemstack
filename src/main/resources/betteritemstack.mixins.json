@@ -2,13 +2,14 @@
   "required": true,
   "minVersion": "0.8",
   "package": "com.zhugey.betteritemstack.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_17",
   "mixins": [
     "HopperBlockEntityMixin",
     "InventoryMixin",
     "ItemEntityMixin",
     "ItemStackMixin",
     "PacketByteBufMixin",
+    "ServerPlayNetworkHandlerMixin",
     "SlotMixin"
   ],
   "injectors": {

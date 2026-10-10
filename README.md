@@ -148,6 +148,7 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 | | `ItemStack#writeNbt` / `ItemStack#fromNbt` | **落盘**的数量由字节改为 int（见第八节） |
 | | `ItemStack#getTooltip` | 追加堆叠数量提示 |
 | `PacketByteBufMixin` | `PacketByteBuf#writeItemStack` / `#readItemStack` | **网络包**里的数量由字节改为 VarInt（见第八节） |
+| `ServerPlayNetworkHandlerMixin` | `ServerPlayNetworkHandler#onCreativeInventoryAction` 里的 `getCount()` | 创造模式取物的服务端校验由硬编码 64 改为真实上限（见第八节） |
 | `InventoryMixin` | `Inventory#getMaxCountPerStack` | 按容器类型区分每格容量 |
 | `SlotMixin` | `Slot#getMaxItemCount(ItemStack)` | GUI 侧容量，保留槽位自身声明的上限 |
 | `HopperBlockEntityMixin` | 漏斗内 4 处 `getMaxCount()` | 判定对象决定上限来源 |
@@ -192,6 +193,27 @@ this.addSlot(new Slot(this.inventory, 0, 15, 47) {
 **兼容性**：VarInt 对 0 ~ 127 就是单个字节，取值与原 `writeByte` 完全一致；NBT 侧同理
 （`putInt(64)` 与 `putByte((byte) 64)` 读出来都是 64）。因此对端没装本模组时，只要数量没超过
 127 就仍能正确解析，不会错位；只有超过 127 才会不一致——而那本来也只有装了本模组才会出现。
+
+#### 附：还有一处不在字节层，但同样会让整摞物品消失——创造模式取物的 64 硬编码校验
+
+`ServerPlayNetworkHandler#onCreativeInventoryAction` 里有一段防作弊校验（本代**直接写死 64**，
+字节码里是一次 `bipush 64`）：
+
+```java
+boolean valid = stack.isEmpty()
+        || stack.getDamage() >= 0 && stack.getCount() <= 64 && !stack.isEmpty();
+```
+
+数量超过 64 的堆叠会被**静默丢弃**（既不 `setStack` 也不回包）。客户端因为本模组放大了
+`getMaxCount()`，点一下就是整整一摞、看起来成功；服务端却没接收。一打开箱子触发整包同步，
+客户端背包被服务端的真实状态覆盖，那一格就没了——**现象与上面两处字节截断完全一样，原因却完全不同**。
+
+1.20.5 起原版才把这里改成 `getCount() <= getMaxCount()`；本代需要用
+`ServerPlayNetworkHandlerMixin` 把那次 `getCount()` 替换成「是否超限」的哨兵值，
+等价地把 `count > 64` 改写成 `count > getMaxCount()`。
+
+> 为什么不直接把常量 64 改掉：`bipush` 只能承载 -128 ~ 127，而 `global_max` 可以在游戏内
+> 随意调高，写死任何值都会在某个上限下重新失效。
 
 ---
 
@@ -366,7 +388,8 @@ player_inventory(Inventory) · chest(Chest / Trapped Chest) · barrel(Barrel) ·
    这类问题靠符号存在性检查发现不了，必须读字节码。直接取 Mojang 客户端产物，
    逐方法统计目标方法的调用次数：漏斗那几处 `ItemStack#getMaxCount()` 用
    `redirect_count_check.py`，网络侧 `PacketByteBuf#writeItemStack` / `#readItemStack` 里的数量读写
-   用 `packet_count_check.py`。后者还会断言**两个写变体里恰好命中一个**——写侧之所以有两个变体，
+   用 `packet_count_check.py`，创造模式那条 `onCreativeInventoryAction` 里的 `ItemStack#getCount()`
+   用 `creative_count_check.py`。网络侧那个脚本还会断言**两个写变体里恰好命中一个**——写侧之所以有两个变体，
    见[第八节](#八数量本身也要装得下两处-8-位上限)与 `PacketByteBufMixin` 的类注释。
 
 > 已知盲区：**构造函数与 `<clinit>`** 不在 intermediary 映射文件里（实测收录 0 条），
@@ -571,6 +594,7 @@ src/main/java/com/zhugey/betteritemstack/
 └── mixin/
     ├── ItemStackMixin.java           物品上限、落盘数量、堆叠数量提示
     ├── PacketByteBufMixin.java       网络包里的数量改用 VarInt
+    ├── ServerPlayNetworkHandlerMixin.java  创造模式取物的上限校验（本代原版写死 64）
     ├── InventoryMixin.java           容器每格上限按类型区分
     ├── SlotMixin.java                GUI 槽位容量（保留槽位自身声明的上限）
     ├── HopperBlockEntityMixin.java   漏斗容量判定接回容器感知逻辑

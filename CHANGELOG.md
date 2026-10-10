@@ -10,16 +10,14 @@
 
 ---
 
-## 1.3.1 — 2026-10-08
+## 1.3.1 — 2026-10-10
 
-**修复 1.20 – 1.20.4 上的严重缺陷：数量超过 127 的物品在同步与存档时会被破坏。**
+**修复 1.20 – 1.20.4 上「创造模式取出一整摞物品，一打开箱子就没了」的一组缺陷（共三处）。**
 
-### 现象
+实测现象：创造模式取出的整摞物品（`global_max`，默认 9999）**看着**已经堆叠成功，但一打开箱子
+那一格就空了。下面三处各自都能单独造成这个结果，全部修掉才恢复正常。
 
-创造模式取出的整摞物品（`global_max`，默认 9999），只要一打开箱子，那一格的数量就会变化；
-256 的整数倍会直接变成 0，整格物品消失。
-
-### 原因
+### 缺陷一：数量在传输与存档时被 8 位字节截断
 
 本代原版把**数量存成 8 位字节**，而这两条路径都不经过 Codec：
 
@@ -30,11 +28,43 @@
 
 1.3.0 漏掉这两条，是因为常规符号核查只问"名字还在不在"，而这两个名字一直都在。
 
-### 修复
+**修复**
 
 - 新增 `PacketByteBufMixin`：网络包里的数量改用 `writeVarInt` / `readVarInt`；
 - `ItemStackMixin` 增加落盘数量的处理：`writeNbt` 的 TAIL 补一个 `putInt("Count")` 覆盖原字节，
   `fromNbt` 的 RETURN 用 `getInt` 还原。
+
+### 缺陷二：创造模式取物的服务端 64 硬编码校验
+
+`ServerPlayNetworkHandler#onCreativeInventoryAction` 里有一段防作弊校验，把「客户端声称的数量」
+与**字面量 64** 比较（字节码里是一次 `bipush 64`，不是 `getMaxCount()`）：
+
+    boolean valid = stack.isEmpty()
+            || stack.getDamage() >= 0 && stack.getCount() <= 64 && !stack.isEmpty();
+
+（1.20.5 起原版才改成 `getCount() <= getMaxCount()`——实测 1.20.5 的对应方法里确实只剩
+`getCount()` 与 `getMaxCount()` 两次调用，没有那个常量。）
+
+于是数量 > 64 的堆叠会被**静默丢弃**：既不 `setStack`、也不回包。客户端因为本模组放大了
+`getMaxCount()`，点一下就是整整一摞，看起来成功；服务端却根本没接收。一打开箱子触发整包同步
+（`InventoryS2CPacket`），客户端背包被服务端的真实状态覆盖，那一格就"消失"了。
+
+**修复**：新增 `ServerPlayNetworkHandlerMixin`，用 `@Redirect` 把校验里唯一的那次
+`ItemStack#getCount()` 调用替换成「是否超限」的哨兵值（超限返回 65、合法返回 1），
+从而把原版的 `count > 64` 等价改写为 `count > getMaxCount()`。
+
+之所以不改那个常量：`bipush` 只能承载 -128 ~ 127，而 `global_max` 由玩家在游戏内任意调高，
+写死任何一个值都会在某个上限下重新失效；也改写不了「把常量换成方法调用」这种操作。
+哨兵值方案一次到位，并且保留了原版的防作弊意图（数量超过真实上限仍会被拒）。
+
+### 缺陷三：`compatibilityLevel` 定得过高，低版本 Mixin 会拒收整份配置
+
+`betteritemstack.mixins.json` 里写的是 `"compatibilityLevel": "JAVA_21"`。
+`depends.fabricloader` 声明的最低版本是 **0.14.21**（随附 Mixin 0.8.5），而 Mixin 0.8.5
+只认识到 `JAVA_17`——遇到 `JAVA_21` 会直接报
+`MixinInitialisationError: ... JAVA_21 which is not recognised` 并**拒收整份 mixin 配置**，
+后果是**全部 Mixin 一起失效**（模组看起来正常加载，却什么都不起作用）。
+改成 `JAVA_17`：与本分支的编译目标一致，也兼容更低版本的加载器。
 
 ### 兼容性
 
@@ -50,6 +80,12 @@ VarInt 对 0 ~ 127 就是单个字节，NBT 侧 `putInt` 与 `putByte` 读出来
   截断值恰为 0 时物品信息已丢失，返回后再改救不回来。
 - 新增离线校验脚本 `packet_count_check.py`，逐个版本断言"恰好命中一个写变体、调用次数为 1"，
   把 `require = 0` 带来的静默风险变成可验证项。
+- 新增离线校验脚本 `creative_count_check.py`：`onCreativeInventoryAction` 在中介映射里
+  **只挂在接口 `ServerPlayPacketListener` 名下**，宿主类的映射块里根本没有它，所以不能直接在
+  宿主类里查成员。脚本改为从接口取 (混淆名, 混淆描述符)、再回宿主类核对"该方法确实声明在自身"，
+  并断言那句 `getCount()` 在 1.20 ~ 1.20.4 **每个版本都恰好被调用一次**（`@Redirect` 的硬性前提）。
+  运行期之所以没问题，是因为 Fabric Loader 用 TinyRemapper 把游戏 jar 重映射到 intermediary 时
+  会把接口成员名传播到实现类。
 - README 更正：本分支**没有** `ItemStack.<clinit>` 的 Codec 重写注入——那是 1.20.5 起原版把数量
   收窄成 `rangedInt(1, 99)` 才需要的，本代 Codec 里的数量本来就不限范围。
 
